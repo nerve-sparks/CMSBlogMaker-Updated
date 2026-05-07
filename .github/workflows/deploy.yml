@@ -16,10 +16,10 @@ jobs:
       - name: SSH and deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USERNAME }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.VM_SSH_KEY || 22 }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
           timeout: 600s
           command_timeout: 5m
           debug: true
