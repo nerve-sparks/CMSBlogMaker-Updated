@@ -1,52 +1,52 @@
 name: Deploy CMS Blog Maker
 
 on:
-    push:
-        branches:
-            - main
-        paths:
-            - 'backend/**'
-    workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - "backend/**"
+  workflow_dispatch:
 
 jobs:
-    deploy:
-        runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: SSH and deploy
-              uses: appleboy/ssh-action@v1.0.3
-              with:
-                host: ${{ secrets.SSH_HOST }}
-                username: ${{ secrets.SSH_USERNAME }}
-                key: ${{ secrets.SSH_KEY }}
-                port: ${{ secrets.SSH_PORT || 22 }}
-                timeout: 600s
-                command_timeout: 5m
-                debug: true
-                script: |
-                    set -e
+    steps:
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          timeout: 600s
+          command_timeout: 5m
+          debug: true
+          script: |
+            set -e
 
-                    APP_DIR="/home/nervesparksdev03/all-agents/CMSBlogMaker"
-                    BACKEND_DIR="$APP_DIR/backend"
-
-                    echo "=== 1. Updating code (fetch + reset to remote) ==="
-                    cd $APP_DIR
-                    git fetch origin main
-                    git reset --hard origin/main
-                    git clean -fd
-
-                    echo "=== 2. Updating backend (conda env cms) ==="
-                    cd $BACKEND_DIR
-                    if [ -f "$HOME/miniconda3/envs/cms/bin/pip" ]; then
-                      $HOME/miniconda3/envs/cms/bin/pip install -r requirements.txt --quiet
-                    else
-                      $HOME/anaconda3/envs/cms/bin/pip install -r requirements.txt --quiet
-                    fi
-
-                    echo "=== 3. Restarting services ==="
-                    sudo systemctl restart cms-agent-backend.service
-
-                    echo "=== Done ==="
-                    sudo systemctl status cms-agent-backend.service --no-pager
+            APP_DIR="/root/all-agents/CMSBlogMaker-Updated"
+            BACKEND_DIR="$APP_DIR/backend"
+            BRANCH="master"
 
 
+            echo "=== 1. Updating code (fetch + reset to remote) ==="
+            cd $APP_DIR
+            git fetch origin $BRANCH
+            git reset --hard origin/$BRANCH
+            git clean -fd
+
+            echo "=== 2. Updating backend (conda env cms) ==="
+            cd $BACKEND_DIR
+            if [ -f "$HOME/miniconda3/envs/cms-backend/bin/pip" ]; then
+              $HOME/miniconda3/envs/cms-backend/bin/pip install -r requirements.txt --quiet
+            else
+              $HOME/anaconda3/envs/cms-backend/bin/pip install -r requirements.txt --quiet
+            fi
+
+            echo "=== 3. Restarting services ==="
+            sudo systemctl restart cms-backend.service
+
+            echo "=== Done ==="
+            sudo systemctl status cms-backend.service --no-pager

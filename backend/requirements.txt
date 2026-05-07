@@ -45,5 +45,6 @@ firebase-admin
 httpx
 
 sqlalchemy
-psycopg2
+psycopg2-binary
 youtube_transcript_api
+psycopg2-binary
