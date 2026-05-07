@@ -43,3 +43,7 @@ firebase-admin
 # Networking
 # =========================
 httpx
+
+sqlalchemy
+psycopg2
+youtube_transcript_api
