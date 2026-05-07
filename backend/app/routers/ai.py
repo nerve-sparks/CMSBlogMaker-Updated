@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -14,7 +15,7 @@ from app.services.gemini_service import (
     gen_image_prompts, gen_final_blog_markdown, gen_youtube_blog_json
 )
 from app.services.image_service import generate_cover_image
-from app.models.firestore_db import create_image
+# 🚨 REMOVED FIRESTORE IMPORT - THIS WAS THE CRASH CAUSE
 from core.deps import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -106,19 +107,12 @@ async def image_generate(payload: ImageGenerateIn, user: dict = Depends(get_curr
         data = payload.model_dump()
         save_to_gallery = data.pop("save_to_gallery", True)
         
+        # 1. This calls your bulletproof image_service with DALL-E fallback
         result = await generate_cover_image(data)
         
+        
         if save_to_gallery:
-            create_image(
-                {
-                    "owner_id": user.get("id"),
-                    "owner_name": user.get("name", ""),
-                    "image_url": result.get("image_url", ""),
-                    "meta": result.get("meta", {}),
-                    "source": data.get("source", "nano"),
-                    "created_at": datetime.now(timezone.utc),
-                }
-            )
+            logger.info(f"Image generated for user {user.get('id')}. Skipping Firestore, ready for Postgres.")
             
         return result
     except Exception as e:
@@ -127,87 +121,47 @@ async def image_generate(payload: ImageGenerateIn, user: dict = Depends(get_curr
 
 
 def _extract_youtube_transcript(url: str) -> str:
-    """
-    Extracts the video ID and parses the custom FetchedTranscriptSnippet objects 
-    returned by your specific local installation of the transcript API.
-    """
     if not url:
         return ""
-        
     video_id = None
-    
     if "youtu.be" in url:
         video_id = url.split("/")[-1].split("?")[0]
     elif "youtube.com" in url:
         parsed_url = urlparse(url)
         query_params = parse_qs(parsed_url.query)
         video_id = query_params.get("v", [None])[0]
-        
     if not video_id:
         return ""
-        
     try:
-        # 1. Instantiate the API (Required by your specific version)
         api = YouTubeTranscriptApi()
-        
-        # 2. Call .list() (This worked perfectly in your first trace)
         transcript_list = api.list(video_id)
-        
-        # 3. Grab the very first available transcript (any language)
         first_available = next(iter(transcript_list))
-        
-        # 4. Fetch the data (Returns a list of FetchedTranscriptSnippet objects)
         transcript_data = first_available.fetch()
-        
         full_text = []
         for item in transcript_data:
-            # 5. Extract the text safely from the object instead of using ["text"]
             text = getattr(item, "text", "")
-            
-            # Fallback just in case it ever returns a dictionary
             if not text and isinstance(item, dict):
                 text = item.get("text", "")
-                
             if text:
                 full_text.append(text.replace('\n', ' '))
-                
         return " ".join(full_text)
-        
     except Exception as e:
         logger.error(f"Failed to fetch YouTube transcript: {e}", exc_info=True)
         return ""
 
 @router.post("/youtube-to-blog")
 async def youtube_to_blog(payload: YoutubeBlogIn, user: dict = Depends(get_current_user)):
-    """
-    The 'God Route': Extracts YouTube transcript (any language), translates, 
-    and generates a fully structured JSON blog post in one shot.
-    """
     try:
         data = payload.model_dump()
-        
-        # 1. Extract Transcript (Any Language)
         transcript = _extract_youtube_transcript(data["youtube_url"])
         if not transcript:
-            raise HTTPException(
-                status_code=400, 
-                detail="Could not extract transcript. The video might be private or have no captions available."
-            )
-        
+            raise HTTPException(status_code=400, detail="Could not extract transcript.")
         data["youtube_transcript"] = transcript
-
-        # 2. Call Gemini to generate the JSON Lego Blocks and Translate to Target Language
         structured_blog = await gen_youtube_blog_json(data)
-        
-        # Ensure the structure exists
         if "meta" not in structured_blog or "final_blog" not in structured_blog:
             raise HTTPException(status_code=500, detail="AI failed to generate correct JSON structure.")
-
-        # 3. Create the Database Record format (Temp ID used until you wire up your actual PostgreSQL save function here)
-        blog_id = "temp-youtube-id" 
-
         return {
-            "blog_id": blog_id,
+            "blog_id": "temp-youtube-id", 
             "meta": {
                 **structured_blog["meta"],
                 "language": data["language"],
@@ -217,7 +171,6 @@ async def youtube_to_blog(payload: YoutubeBlogIn, user: dict = Depends(get_curre
             },
             "final_blog": structured_blog["final_blog"]
         }
-
     except Exception as e:
         logger.error(f"YouTube to Blog failed: {str(e)}", exc_info=True)
         _raise_ai_error(e)
@@ -227,18 +180,73 @@ async def youtube_to_blog(payload: YoutubeBlogIn, user: dict = Depends(get_curre
 async def blog_generate(payload: GenerateBlogIn):
     try:
         payload_dict = payload.model_dump()
-
         if payload.youtube_url:
             transcript = _extract_youtube_transcript(payload.youtube_url)
             if transcript:
                 payload_dict["youtube_transcript"] = transcript
 
-        raw_json_string = await gen_final_blog_markdown(payload_dict)
+        raw_text = await gen_final_blog_markdown(payload_dict)
+        clean_markdown = raw_text.strip()
 
-        clean_string = raw_json_string.replace("```json", "").replace("```", "").strip()
-        blocks = json.loads(clean_string)
+        try:
+            json_str = re.sub(r'^```(json)?\n', '', clean_markdown)
+            json_str = re.sub(r'\n```$', '', json_str)
+            parsed_json = json.loads(json_str)
+            for key, value in parsed_json.items():
+                if isinstance(value, str) and "#" in value:
+                    clean_markdown = value
+                    break
+        except Exception:
+            pass
 
-        return {"blocks": blocks}
+        clean_markdown = clean_markdown.replace("\\n", "\n")
+        lines = clean_markdown.split('\n')
+        intro_lines = []
+        sections = []
+        conclusion_lines = []
+        current_mode = "intro"
+        current_heading = ""
+        current_content = []
 
+        for line in lines:
+            if line.startswith("# "):
+                continue
+            if line.startswith("## "):
+                if current_mode == "section":
+                    sections.append({
+                        "heading": current_heading,
+                        "content_md": "\n".join(current_content).strip()
+                    })
+                heading_text = line.replace("## ", "").strip()
+                if "conclusion" in heading_text.lower() or "summary" in heading_text.lower():
+                    current_mode = "conclusion"
+                else:
+                    current_mode = "section"
+                    current_heading = heading_text
+                    current_content = []
+            else:
+                if current_mode == "intro":
+                    intro_lines.append(line)
+                elif current_mode == "section":
+                    current_content.append(line)
+                elif current_mode == "conclusion":
+                    conclusion_lines.append(line)
+                    
+        if current_mode == "section" and current_heading:
+            sections.append({
+                "heading": current_heading,
+                "content_md": "\n".join(current_content).strip()
+            })
+
+        return {
+            "markdown": clean_markdown,
+            "render": {
+                "title": payload_dict.get("title", "Untitled"),
+                "intro_md": "\n".join(intro_lines).strip(),
+                "sections": sections,
+                "conclusion_md": "\n".join(conclusion_lines).strip()
+            }
+        }
     except Exception as e:
+        logger.error(f"Generation failed: {str(e)}", exc_info=True)
         _raise_ai_error(e)

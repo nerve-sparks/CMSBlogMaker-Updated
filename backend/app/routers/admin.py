@@ -19,7 +19,7 @@ async def list_pending_blogs(
     skip = (page - 1) * limit
     tenant_id = admin.get("tenant_id")
     
-    # Bulletproof Query: 
+   
     # Grab blogs for this tenant where status is NULL, empty, or anything OTHER than published/approved/rejected
     query = db.query(BlogPost).filter(
         BlogPost.tenant_id == tenant_id,
