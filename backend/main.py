@@ -73,4 +73,4 @@ api_app.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Create root app and mount API at /cms-backend
 app = FastAPI()
-app.mount("/cms-backend", api_app)
+# app.mount("/cms-backend", api_app)
