@@ -68,12 +68,7 @@ class YoutubeBlogIn(BaseModel):
     image_count: Optional[int] = 0
 
 class FinalBlog(BaseModel):
-    """
-    NEW LEGO BLOCK ARCHITECTURE
-    Instead of raw markdown, we store an array of structured JSON blocks.
-    Example: [{"type": "h1", "content": "Hello"}, {"type": "image_prompt", "description": "..."}]
-    """
-    blocks: List[dict]
+    blocks: List[dict] = []
 
 
 # Metadata that came from your multi-step form (final selected/manual only)

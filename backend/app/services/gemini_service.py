@@ -195,28 +195,53 @@ async def gen_image_prompts(payload: dict) -> List[str]:
 # Final blog generation returns ONE markdown (not 5)
 async def gen_final_blog_markdown(payload: dict) -> str:
     refs = payload.get("reference_links", "")
+    cover = payload.get("cover_image_url", "")
+    title = payload["title"]
+
+    cover_rule = (
+        f'- Second element must be {{"type": "image", "url": "{cover}", "alt": "Cover"}}'
+        if cover else ""
+    )
+    refs_rule = (
+        '- End with a {"type": "h2", "content": "References"} block followed by a {"type": "ul", "items": [...]} block with the reference links'
+        if refs else ""
+    )
+
     prompt = dedent(f"""
-    {_sys(payload['tone'], payload['creativity'])}
-    Focus/Niche: {payload['focus_or_niche']}
-    Keyword: {payload.get('targeted_keyword','')}
-    Audience: {payload.get('targeted_audience','')}
-    Reference links: {refs}
+    You are a senior blog writer. Tone: {payload['tone']}. Creativity: {payload['creativity']}.
 
-    Selected idea: {payload['selected_idea']}
-    Title: {payload['title']}
-    Intro (markdown): {payload['intro_md']}
-    Outline headings: {payload['outline']}
-    Cover image url: {payload.get('cover_image_url','')}
+    Write a complete blog post as a JSON array of block objects.
 
-        Write a complete blog post in Markdown.
-        Rules:
-        - Start with '# {{Title}}'
-        - If cover_image_url is not empty, include: ![Cover](cover_image_url)
-        - Use '##' headings based on the outline
-        - Include a '## Conclusion' section
-        - If reference links exist, include '## References' with bullet links.
-        Return ONLY the Markdown text.
-        """).lstrip("\n")
+    Context:
+    - Focus/Niche: {payload['focus_or_niche']}
+    - Keyword: {payload.get('targeted_keyword', '')}
+    - Audience: {payload.get('targeted_audience', '')}
+    - Reference links: {refs}
+    - Selected idea: {payload['selected_idea']}
+    - Title: {title}
+    - Intro: {payload['intro_md']}
+    - Outline headings: {payload['outline']}
+
+    Block types allowed:
+    {{"type": "h1", "content": "..."}}
+    {{"type": "h2", "content": "..."}}
+    {{"type": "h3", "content": "..."}}
+    {{"type": "p", "content": "..."}}
+    {{"type": "image", "url": "...", "alt": "..."}}
+    {{"type": "ul", "items": ["...", "..."]}}
+    {{"type": "ol", "items": ["...", "..."]}}
+    {{"type": "blockquote", "content": "..."}}
+    {{"type": "hr"}}
+
+    Rules:
+    - First element must be {{"type": "h1", "content": "{title}"}}
+    {cover_rule}
+    - Use h2 blocks for each outline heading, followed by p blocks for content
+    - Include a {{"type": "h2", "content": "Conclusion"}} section at the end
+    {refs_rule}
+    - Output ONLY a raw JSON array starting with [ and ending with ]
+    - No markdown, no code fences, no explanation, no extra keys
+    """).lstrip("\n")
 
     model = _get_model()
     resp = model.generate_content(
