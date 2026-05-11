@@ -27,10 +27,11 @@ def _string_options_schema(count: int) -> type[BaseModel]:
         options=(List[str], Field(min_length=count, max_length=count)),
     )
 
-def _sys(tone: str, creativity: str) -> str:
+def _sys(tone: str, creativity: str, language: str = "English") -> str:
     return (
         "You are a senior blog writer.\n"
-        "Language must be English.\n"
+        f"CRITICAL LANGUAGE RULE: You MUST generate the readable content entirely in {language}. Even if the user's input, keywords, niche, or selected idea are written in English, you MUST translate your response and output the text in {language}.\n"
+        "CRITICAL JSON RULE: If returning JSON, YOU MUST KEEP ALL JSON KEYS IN ENGLISH. Only translate the values.\n"
         f"Tone: {tone}\n"
         f"Creativity: {creativity}\n"
         "Return ONLY valid JSON according to the schema.\n"
@@ -42,8 +43,19 @@ def _call_json_model(prompt: str) -> dict:
     model = _get_model()
     resp = model.generate_content(prompt)
     text = (resp.text or "").strip()
+    
+    # Find where the JSON actually begins
+    start_idx = text.find('{')
+    if start_idx == -1:
+        logging.error("No JSON object found in response: %r", text)
+        raise ValueError("No JSON object found in AI response")
+        
     try:
-        return json.loads(text)
+        # raw_decode reads the very first complete JSON object and automatically 
+        # ignores any trailing text, markdown, or extra objects the AI appended!
+        decoder = json.JSONDecoder()
+        obj, idx = decoder.raw_decode(text[start_idx:])
+        return obj
     except Exception as e:
         logging.error("Failed to parse JSON from Gemini response: %s\nRaw: %r", e, text)
         raise
@@ -51,7 +63,7 @@ def _call_json_model(prompt: str) -> dict:
 
 async def gen_topic_ideas(payload: dict) -> List[str]:
     prompt = dedent(f"""
-    {_sys(payload['tone'], payload['creativity'])}
+    {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
     Focus/Niche: {payload['focus_or_niche']}
     Targeted keyword: {payload.get('targeted_keyword','')}
     Targeted audience: {payload.get('targeted_audience','')}
@@ -72,7 +84,7 @@ async def gen_topic_ideas(payload: dict) -> List[str]:
 async def gen_titles(payload: dict) -> List[str]:
     try:
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -96,7 +108,7 @@ async def gen_titles(payload: dict) -> List[str]:
 async def gen_intros(payload: dict) -> List[str]:
     try:
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -127,7 +139,7 @@ class _OutlineOptions(BaseModel):
 async def gen_outlines(payload: dict):
     try:
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -159,8 +171,10 @@ async def gen_outlines(payload: dict):
 
 async def gen_image_prompts(payload: dict) -> List[str]:
     try:
+        # Note: Image prompts are usually best kept in English for AI image generators, 
+        # but we are passing the selected language just in case you want the user to see the options in their language.
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Selected idea: {payload['selected_idea']}
@@ -185,7 +199,7 @@ async def gen_image_prompts(payload: dict) -> List[str]:
 async def gen_final_blog_markdown(payload: dict) -> str:
     refs = payload.get("reference_links", "")
     prompt = dedent(f"""
-    {_sys(payload['tone'], payload['creativity'])}
+    {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
@@ -213,3 +227,56 @@ async def gen_final_blog_markdown(payload: dict) -> str:
         generation_config={"temperature": 0.7},
     )
     return (resp.text or "").strip()
+
+
+async def gen_youtube_blog_json(payload: dict) -> dict:
+    """
+    Takes a YouTube transcript and user preferences, and generates a fully
+    structured blog post in JSON format (Lego Blocks).
+    """
+    transcript = payload.get("youtube_transcript", "")
+    tone = payload.get("tone", "Formal")
+    language = payload.get("language", "English")
+    
+    prompt = dedent(f"""
+    You are an elite, senior technical blog writer.
+    Your task is to convert the following YouTube video transcript into a highly engaging, structured blog post.
+
+    REQUIREMENTS:
+    - Tone: {tone}
+    - Language: The actual blog content MUST be written in {language}. If the transcript below is in Hindi, Spanish, or any other language, you MUST accurately translate it.
+    - CRITICAL RULE: YOU MUST KEEP ALL JSON KEYS IN ENGLISH. Do not translate the keys like "meta", "final_blog", "title", "intro_md", "outline", "render", "sections", "heading", "content_md", "conclusion_md". Only translate the values.
+    - Quality: Do not just summarize. Write a comprehensive, standalone article that flows naturally.
+    
+    You MUST return ONLY a valid JSON object matching this exact schema:
+    {{
+      "meta": {{
+        "title": "A catchy, SEO-friendly title",
+        "intro_md": "A strong 1-2 paragraph introduction in markdown",
+        "outline": ["Heading 1", "Heading 2", "Heading 3"] 
+      }},
+      "final_blog": {{
+        "render": {{
+          "title": "A catchy, SEO-friendly title (same as above)",
+          "intro_md": "The exact same intro markdown",
+          "sections": [
+            {{
+              "heading": "Heading 1",
+              "content_md": "Detailed markdown content for this section."
+            }},
+            {{
+              "heading": "Heading 2",
+              "content_md": "Detailed markdown content for this section."
+            }}
+          ],
+          "conclusion_md": "A strong concluding paragraph in markdown."
+        }}
+      }}
+    }}
+
+    YOUTUBE TRANSCRIPT:
+    {transcript[:25000]}  
+    """).strip()
+
+    data = _call_json_model(prompt)
+    return data
