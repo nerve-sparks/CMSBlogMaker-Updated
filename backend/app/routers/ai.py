@@ -15,7 +15,7 @@ from app.services.gemini_service import (
     gen_image_prompts, gen_final_blog_markdown, gen_youtube_blog_json
 )
 from app.services.image_service import generate_cover_image
-# 🚨 REMOVED FIRESTORE IMPORT - THIS WAS THE CRASH CAUSE
+# REMOVED FIRESTORE IMPORT - THIS WAS THE CRASH CAUSE
 from core.deps import get_current_user
 
 logger = logging.getLogger(__name__)

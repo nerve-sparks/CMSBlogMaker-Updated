@@ -18,7 +18,7 @@ def normalize_markdown(markdown_text: str) -> str:
     return text
 
 def markdown_to_html(markdown_text: str) -> str:
-    # production-friendly: basic extensions
+   
     markdown_text = normalize_markdown(markdown_text)
     return md.markdown(
         markdown_text,

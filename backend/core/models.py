@@ -57,3 +57,16 @@ class ImageAsset(Base):
     
     #  Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+# PASTE THIS AT THE BOTTOM OF YOUR MODELS FILE
+
+class TenantAPIKey(Base):
+    """
+    Stores the public API keys for the headless CMS feature.
+    Maps a random string key to a specific tenant.
+    """
+    __tablename__ = "tenant_api_keys"
+
+    tenant_id = Column(String, primary_key=True, index=True)
+    api_key = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
