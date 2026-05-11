@@ -27,10 +27,11 @@ def _string_options_schema(count: int) -> type[BaseModel]:
         options=(List[str], Field(min_length=count, max_length=count)),
     )
 
-def _sys(tone: str, creativity: str) -> str:
+def _sys(tone: str, creativity: str, language: str = "English") -> str:
     return (
         "You are a senior blog writer.\n"
-        "Language must be English.\n"
+        f"CRITICAL LANGUAGE RULE: You MUST generate the readable content entirely in {language}. Even if the user's input, keywords, niche, or selected idea are written in English, you MUST translate your response and output the text in {language}.\n"
+        "CRITICAL JSON RULE: If returning JSON, YOU MUST KEEP ALL JSON KEYS IN ENGLISH. Only translate the values.\n"
         f"Tone: {tone}\n"
         f"Creativity: {creativity}\n"
         "Return ONLY valid JSON according to the schema.\n"
@@ -62,7 +63,7 @@ def _call_json_model(prompt: str) -> dict:
 
 async def gen_topic_ideas(payload: dict) -> List[str]:
     prompt = dedent(f"""
-    {_sys(payload['tone'], payload['creativity'])}
+    {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
     Focus/Niche: {payload['focus_or_niche']}
     Targeted keyword: {payload.get('targeted_keyword','')}
     Targeted audience: {payload.get('targeted_audience','')}
@@ -83,7 +84,7 @@ async def gen_topic_ideas(payload: dict) -> List[str]:
 async def gen_titles(payload: dict) -> List[str]:
     try:
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -107,7 +108,7 @@ async def gen_titles(payload: dict) -> List[str]:
 async def gen_intros(payload: dict) -> List[str]:
     try:
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -138,7 +139,7 @@ class _OutlineOptions(BaseModel):
 async def gen_outlines(payload: dict):
     try:
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -170,8 +171,10 @@ async def gen_outlines(payload: dict):
 
 async def gen_image_prompts(payload: dict) -> List[str]:
     try:
+        # Note: Image prompts are usually best kept in English for AI image generators, 
+        # but we are passing the selected language just in case you want the user to see the options in their language.
         prompt = dedent(f"""
-        {_sys(payload['tone'], payload['creativity'])}
+        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Selected idea: {payload['selected_idea']}
@@ -208,40 +211,27 @@ async def gen_final_blog_markdown(payload: dict) -> str:
     )
 
     prompt = dedent(f"""
-    You are a senior blog writer. Tone: {payload['tone']}. Creativity: {payload['creativity']}.
+    {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
+    Focus/Niche: {payload['focus_or_niche']}
+    Keyword: {payload.get('targeted_keyword','')}
+    Audience: {payload.get('targeted_audience','')}
+    Reference links: {refs}
 
-    Write a complete blog post as a JSON array of block objects.
+    Selected idea: {payload['selected_idea']}
+    Title: {payload['title']}
+    Intro (markdown): {payload['intro_md']}
+    Outline headings: {payload['outline']}
+    Cover image url: {payload.get('cover_image_url','')}
 
-    Context:
-    - Focus/Niche: {payload['focus_or_niche']}
-    - Keyword: {payload.get('targeted_keyword', '')}
-    - Audience: {payload.get('targeted_audience', '')}
-    - Reference links: {refs}
-    - Selected idea: {payload['selected_idea']}
-    - Title: {title}
-    - Intro: {payload['intro_md']}
-    - Outline headings: {payload['outline']}
-
-    Block types allowed:
-    {{"type": "h1", "content": "..."}}
-    {{"type": "h2", "content": "..."}}
-    {{"type": "h3", "content": "..."}}
-    {{"type": "p", "content": "..."}}
-    {{"type": "image", "url": "...", "alt": "..."}}
-    {{"type": "ul", "items": ["...", "..."]}}
-    {{"type": "ol", "items": ["...", "..."]}}
-    {{"type": "blockquote", "content": "..."}}
-    {{"type": "hr"}}
-
-    Rules:
-    - First element must be {{"type": "h1", "content": "{title}"}}
-    {cover_rule}
-    - Use h2 blocks for each outline heading, followed by p blocks for content
-    - Include a {{"type": "h2", "content": "Conclusion"}} section at the end
-    {refs_rule}
-    - Output ONLY a raw JSON array starting with [ and ending with ]
-    - No markdown, no code fences, no explanation, no extra keys
-    """).lstrip("\n")
+        Write a complete blog post in Markdown.
+        Rules:
+        - Start with '# {{Title}}'
+        - If cover_image_url is not empty, include: ![Cover](cover_image_url)
+        - Use '##' headings based on the outline
+        - Include a '## Conclusion' section
+        - If reference links exist, include '## References' with bullet links.
+        Return ONLY the Markdown text.
+        """).lstrip("\n")
 
     model = _get_model()
     resp = model.generate_content(
@@ -266,7 +256,8 @@ async def gen_youtube_blog_json(payload: dict) -> dict:
 
     REQUIREMENTS:
     - Tone: {tone}
-    - Language: MUST BE ENTIRELY IN {language}. If the transcript below is in Hindi, Spanish, or any other language, you MUST accurately translate it and write the final blog in {language}.
+    - Language: The actual blog content MUST be written in {language}. If the transcript below is in Hindi, Spanish, or any other language, you MUST accurately translate it.
+    - CRITICAL RULE: YOU MUST KEEP ALL JSON KEYS IN ENGLISH. Do not translate the keys like "meta", "final_blog", "title", "intro_md", "outline", "render", "sections", "heading", "content_md", "conclusion_md". Only translate the values.
     - Quality: Do not just summarize. Write a comprehensive, standalone article that flows naturally.
     
     You MUST return ONLY a valid JSON object matching this exact schema:

@@ -1,7 +1,9 @@
+
 import base64
 import logging
 import os
 import uuid
+import asyncio
 from io import BytesIO
 from textwrap import dedent
 
@@ -44,32 +46,22 @@ def _get_client() -> genai.Client:
 openai_client = OpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
 
 def _get_storage_client() -> storage.Client:
-    """
-    Get Google Cloud Storage client.
-    Uses GOOGLE_APPLICATION_CREDENTIALS for GCS bucket access.
-    This is separate from FIREBASE_CREDENTIALS_PATH used for Firestore.
-    """
     global _storage_client
     if _storage_client is None:
         from google.oauth2 import service_account
         
-        # Use GOOGLE_APPLICATION_CREDENTIALS for GCS bucket (separate from Firestore credentials)
         creds_path = None
-        
-        # Priority: GOOGLE_APPLICATION_CREDENTIALS environment variable
         if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
             creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        # Fallback: settings.GOOGLE_APPLICATION_CREDENTIALS
-        elif settings.GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(settings.GOOGLE_APPLICATION_CREDENTIALS):
+        elif hasattr(settings, "GOOGLE_APPLICATION_CREDENTIALS") and settings.GOOGLE_APPLICATION_CREDENTIALS and os.path.exists(settings.GOOGLE_APPLICATION_CREDENTIALS):
             creds_path = settings.GOOGLE_APPLICATION_CREDENTIALS
         
         if creds_path and os.path.exists(creds_path):
             credentials = service_account.Credentials.from_service_account_file(creds_path)
-            _storage_client = storage.Client(credentials=credentials, project=settings.FIREBASE_PROJECT_ID)
+            _storage_client = storage.Client(credentials=credentials)
             logger.info(f"GCS Storage client initialized with credentials from: {creds_path}")
         else:
-            
-            _storage_client = storage.Client(project=settings.FIREBASE_PROJECT_ID)
+            _storage_client = storage.Client()
             logger.info("GCS Storage client initialized with default credentials")
     return _storage_client
 
@@ -86,20 +78,6 @@ def _gcs_object_name(filename: str) -> str:
 def _gcs_public_url(object_name: str) -> str:
     base = (settings.GCS_PUBLIC_BASE or "https://storage.googleapis.com").rstrip("/")
     return f"{base}/{_require_bucket()}/{object_name}"
-
-def _content_type_from_ext(ext: str) -> str:
-    ext = (ext or "").lower().lstrip(".")
-    if ext in ("jpg", "jpeg"):
-        return "image/jpeg"
-    if ext == "png":
-        return "image/png"
-    if ext == "webp":
-        return "image/webp"
-    if ext == "gif":
-        return "image/gif"
-    if ext == "bmp":
-        return "image/bmp"
-    return "application/octet-stream"
 
 def upload_bytes_to_gcs(data: bytes, filename: str, content_type: str | None = None) -> str:
     bucket_name = _require_bucket()
@@ -178,44 +156,70 @@ def _prepare_image(data: bytes, mime_type: str | None) -> tuple[bytes, str]:
     ext = _extension_from_bytes(normalized, mime_type)
     return normalized, ext
 
-import asyncio
-
 
 async def generate_cover_image(payload: dict) -> dict:
     os.makedirs("uploads", exist_ok=True)
 
-    final_prompt = dedent(f"""
-    Create a high-quality blog cover image.
-    Language context: English blog.
-    Tone: {payload['tone']}
-    Creativity: {payload['creativity']}
-    Focus/Niche: {payload['focus_or_niche']}
-    Keyword: {payload.get('targeted_keyword','')}
-    Title: {payload.get('title','')}
-
-    Aspect ratio: {payload['aspect_ratio']}
-    Quality: {payload['quality']}
-    Primary color: {payload['primary_color']}
-    User prompt: {payload['prompt']}
-    No watermark, no logos, no text.
-    """).lstrip("\n")
+    # Use the exact prompt the user provided, no matter where it came from
+    user_prompt = payload.get('prompt', '').strip()
+    
+    # If there's no prompt, use a generic fallback
+    if not user_prompt:
+         user_prompt = "A professional high-quality blog cover image."
 
    
-    
+    final_prompt = dedent(f"""
+    Create a high-quality, professional blog cover image.
+    Visual Description: {user_prompt}
+    Primary color theme: {payload.get('primary_color', '#000000')}
+    Style: Editorial illustration, cinematic lighting.
+    Constraints: NO text, NO watermarks, NO logos.
+    """).lstrip("\n")
+
     def run_sync_generation():
         try:
             client = _get_client()
-            cfg = types.GenerateContentConfig(
-                response_modalities=["Image"],
-                image_config=types.ImageConfig(aspect_ratio=payload["aspect_ratio"]),
-            )
+            aspect_ratio_str = payload.get("aspect_ratio", "1:1")
+            model_name = settings.GEMINI_IMAGE_MODEL
+            
+            logger.info(f"Attempting to generate image with Paid Gemini Model: {model_name}")
 
             
-            resp = client.models.generate_content(
-                model=settings.GEMINI_IMAGE_MODEL,
-                contents=[final_prompt],
-                config=cfg,
-            )
+            if "imagen" in model_name.lower():
+                result = client.models.generate_images(
+                    model=model_name, 
+                    prompt=final_prompt,
+                    config=types.GenerateImagesConfig(
+                        number_of_images=1,
+                        aspect_ratio=aspect_ratio_str,
+                        output_mime_type="image/png",
+                        person_generation="ALLOW_ADULT" 
+                    )
+                )
+                if not result or not result.generated_images:
+                    raise RuntimeError("Gemini returned an empty image list.")
+                image_bytes = result.generated_images[0].image.image_bytes
+                
+            else:
+                cfg = types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    safety_settings=[
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                    ]
+                )
+                prompt_with_ratio = final_prompt + f"\nASPECT RATIO: {aspect_ratio_str}"
+                
+                result = client.models.generate_content(
+                    model=model_name, 
+                    contents=[prompt_with_ratio],
+                    config=cfg,
+                )
+                if not result or not result.parts or not result.parts[0].inline_data:
+                    raise RuntimeError("Gemini multimodal returned an empty or blocked response.")
+                image_bytes = result.parts[0].inline_data.data
 
             for part in resp.parts:
                 if part.inline_data is not None:
@@ -240,7 +244,6 @@ async def generate_cover_image(payload: dict) -> dict:
         except Exception as e:
             logger.warning(f"Gemini image generation failed: {e}. Falling back to OpenAI DALL-E.")
             
-            # Fallback to OpenAI DALL-E
             if openai_client is None:
                 raise RuntimeError(f"Gemini error: {e}. OpenAI API key not configured.")
             
@@ -249,12 +252,12 @@ async def generate_cover_image(payload: dict) -> dict:
                 "4:3": "1792x1024", "16:9": "1792x1024",
                 "3:4": "1024x1792", "9:16": "1024x1792",
             }
-            size = aspect_ratio_map.get(payload["aspect_ratio"], "1024x1024")
+            size = aspect_ratio_map.get(payload.get("aspect_ratio", "1:1"), "1024x1024")
             quality_map = {"low": "standard", "medium": "standard", "high": "hd"}
-            dall_e_quality = quality_map.get(payload["quality"], "hd")
+            dall_e_quality = quality_map.get(payload.get("quality", "standard"), "hd")
             
+            # Pass the user's prompt directly to DALL-E
             try:
-                
                 response = openai_client.images.generate(
                     model=settings.OPENAI_IMAGE_MODEL,
                     prompt=final_prompt,
@@ -262,10 +265,7 @@ async def generate_cover_image(payload: dict) -> dict:
                     quality=dall_e_quality,
                     n=1,
                 )
-                
                 image_url = response.data[0].url
-                
-                
                 img_response = requests.get(image_url, stream=True, timeout=30)
                 img_response.raise_for_status()
                 
@@ -278,15 +278,14 @@ async def generate_cover_image(payload: dict) -> dict:
                 return {
                     "image_url": image_url,
                     "meta": {
-                        "aspect_ratio": payload["aspect_ratio"],
-                        "quality": payload["quality"],
-                        "primary_color": payload["primary_color"],
+                        "aspect_ratio": payload.get("aspect_ratio", "1:1"),
+                        "quality": payload.get("quality", "standard"),
+                        "primary_color": payload.get("primary_color", ""),
                         "model": settings.OPENAI_IMAGE_MODEL,
-                        "prompt": payload["prompt"],
+                        "prompt": user_prompt, # Return the original user prompt
                     },
                 }
             except Exception as openai_error:
                 raise RuntimeError(f"Gemini error: {e}. OpenAI error: {str(openai_error)}")
 
-   
     return await asyncio.to_thread(run_sync_generation)

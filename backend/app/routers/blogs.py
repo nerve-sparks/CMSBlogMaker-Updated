@@ -1,6 +1,10 @@
 import os
 import uuid
 from datetime import datetime, timezone
+import re
+
+from fastapi import Header
+from core.models import TenantAPIKey
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
@@ -19,7 +23,6 @@ def _parse_id(item_id: str) -> int:
         return int(item_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid ID format.")
-
 
 def _map_blog_for_list(b: BlogPost) -> dict:
     content = b.content_blocks or {}
@@ -57,7 +60,6 @@ def _map_blog_detail(b: BlogPost) -> dict:
         "published_at": content.get("admin_review", {}).get("reviewed_at") if b.status == "published" else None
     }
 
-
 @router.post("/blog", response_model=dict)
 async def save_blog(payload: BlogCreateIn, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     meta_dict = payload.meta.model_dump()
@@ -92,7 +94,6 @@ async def save_blog(payload: BlogCreateIn, user: dict = Depends(get_current_user
     
     return {"blog_id": str(db_blog.id), "status": "saved"}
 
-
 @router.get("/blog", response_model=dict)
 async def list_my_blogs(
     user: dict = Depends(get_current_user),
@@ -113,7 +114,6 @@ async def list_my_blogs(
     
     items = [_map_blog_for_list(b) for b in blogs]
     return {"items": items, "page": page, "limit": limit, "total": total}
-
 
 @router.get("/blogs/stats", response_model=dict)
 async def blog_stats(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -139,7 +139,6 @@ async def blog_stats(user: dict = Depends(get_current_user), db: Session = Depen
         "published_blogs": published,
         "generated_images": images_count,
     }
-
 
 @router.post("/blogs/uploads/images", response_model=dict)
 async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -167,7 +166,6 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
     
     return {"image_url": image_url}
 
-
 @router.get("/blogs/{blog_id}")
 async def get_blog(blog_id: str, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     b_id = _parse_id(blog_id)
@@ -181,7 +179,6 @@ async def get_blog(blog_id: str, user: dict = Depends(get_current_user), db: Ses
             raise HTTPException(status_code=403, detail="Not allowed")
 
     return _map_blog_detail(b)
-
 
 @router.delete("/blogs/{blog_id}", response_model=dict)
 async def delete_blog_route(blog_id: str, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -198,7 +195,6 @@ async def delete_blog_route(blog_id: str, user: dict = Depends(get_current_user)
     db.delete(b)
     db.commit()
     return {"ok": True}
-
 
 @router.put("/blogs/{blog_id}", response_model=dict)
 async def update_blog_route(blog_id: str, payload: BlogCreateIn, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -224,7 +220,6 @@ async def update_blog_route(blog_id: str, payload: BlogCreateIn, user: dict = De
     
     db.commit()
     return {"ok": True, "blog_id": blog_id}
-
 
 @router.post("/blogs/{blog_id}/publish-request", response_model=dict)
 async def request_publish(blog_id: str, payload: BlogCreateIn, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -257,148 +252,6 @@ async def request_publish(blog_id: str, payload: BlogCreateIn, user: dict = Depe
     db.commit()
     return {"ok": True, "status": "pending", "blog_id": blog_id}
 
-# ==========================================
-#  ADMIN ROUTES (FIXED)
-# ==========================================
-
-@router.get("/admin/blogs/pending", response_model=dict)
-async def list_pending_blogs(admin: dict = Depends(require_admin), db: Session = Depends(get_db), page: int = Query(1, ge=1), limit: int = Query(10, ge=5, le=50)):
-    skip = (page - 1) * limit
-    
-    #  FIX: Now captures 'saved', 'draft', AND 'pending' blogs 
-    query = db.query(BlogPost).filter(
-        BlogPost.status.in_(["saved", "draft", "pending"]),
-        BlogPost.tenant_id == admin.get("tenant_id")
-    )
-    
-    total = query.count()
-    blogs = query.order_by(desc(BlogPost.updated_at)).offset(skip).limit(limit).all()
-    
-    items = [_map_blog_for_list(b) for b in blogs]
-    return {"items": items, "page": page, "limit": limit, "total": total}
-
-
-@router.get("/admin/blogs/published", response_model=dict)
-async def list_published_blogs(admin: dict = Depends(require_admin), db: Session = Depends(get_db), page: int = Query(1, ge=1), limit: int = Query(10, ge=5, le=50)):
-    skip = (page - 1) * limit
-    
-    query = db.query(BlogPost).filter(
-        BlogPost.status.in_(["published", "approved"]),
-        BlogPost.tenant_id == admin.get("tenant_id")
-    )
-    
-    total = query.count()
-    blogs = query.order_by(desc(BlogPost.updated_at)).offset(skip).limit(limit).all()
-    
-    items = [_map_blog_for_list(b) for b in blogs]
-    return {"items": items, "page": page, "limit": limit, "total": total}
-
-
-@router.post("/admin/blogs/{blog_id}/approve", response_model=dict)
-async def approve_blog(blog_id: str, admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    b_id = _parse_id(blog_id)
-    b = db.query(BlogPost).filter(BlogPost.id == b_id).first()
-    
-    if not b:
-        raise HTTPException(status_code=404, detail="Blog not found")
-    if b.tenant_id != admin.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Cross-tenant access forbidden")
-        
-    # Allow approving 'saved' blogs directly from the dashboard without erroring
-    if b.status not in ["pending", "saved", "draft"]:
-        raise HTTPException(status_code=400, detail="Blog is not in a pending or saved state")
-
-    content = b.content_blocks or {}
-    admin_review = content.get("admin_review", {})
-    
-    now_iso = datetime.now(timezone.utc).isoformat()
-    admin_review["reviewed_at"] = now_iso
-    admin_review["reviewed_by"] = admin["id"]
-    admin_review["reviewed_by_name"] = admin["name"]
-    admin_review["feedback"] = ""
-    
-    content["admin_review"] = admin_review
-    b.content_blocks = content
-    b.status = "published"
-    
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(b, "content_blocks")
-    
-    db.commit()
-    return {"ok": True, "status": "published"}
-
-
-@router.post("/admin/blogs/{blog_id}/reject", response_model=dict)
-async def reject_blog(blog_id: str, feedback: str = Query("", description="Rejection feedback"), admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    b_id = _parse_id(blog_id)
-    b = db.query(BlogPost).filter(BlogPost.id == b_id).first()
-    
-    if not b:
-        raise HTTPException(status_code=404, detail="Blog not found")
-    if b.tenant_id != admin.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Cross-tenant access forbidden")
-        
-    # 🚨 FIX: Allow rejecting 'saved' blogs directly
-    if b.status not in ["pending", "saved", "draft"]:
-        raise HTTPException(status_code=400, detail="Blog is not in a pending or saved state")
-
-    content = b.content_blocks or {}
-    admin_review = content.get("admin_review", {})
-    
-    admin_review["reviewed_at"] = datetime.now(timezone.utc).isoformat()
-    admin_review["reviewed_by"] = admin["id"]
-    admin_review["reviewed_by_name"] = admin["name"]
-    admin_review["feedback"] = feedback or "Blog rejected. Please review and resubmit."
-    
-    content["admin_review"] = admin_review
-    b.content_blocks = content
-    b.status = "saved"
-    
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(b, "content_blocks")
-    
-    db.commit()
-    return {"ok": True, "status": "saved", "feedback": feedback}
-
-
-@router.post("/admin/blogs/{blog_id}/comment", response_model=dict)
-async def add_blog_comment(blog_id: str, payload: BlogCommentIn, admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
-    b_id = _parse_id(blog_id)
-    b = db.query(BlogPost).filter(BlogPost.id == b_id).first()
-    
-    if not b:
-        raise HTTPException(status_code=404, detail="Blog not found")
-    if b.tenant_id != admin.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Cross-tenant access forbidden")
-
-    content = b.content_blocks or {}
-    admin_review = content.get("admin_review", {})
-    
-    existing_feedback = admin_review.get("feedback", "")
-    new_feedback = payload.comment.strip()
-    
-    if existing_feedback and new_feedback:
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-        updated_feedback = f"{existing_feedback}\n\n--- {admin.get('name', 'Admin')} ({timestamp}) ---\n{new_feedback}"
-    else:
-        updated_feedback = new_feedback
-
-    admin_review["feedback"] = updated_feedback
-    
-    if not admin_review.get("reviewed_by"):
-        admin_review["reviewed_by"] = admin["id"]
-        admin_review["reviewed_by_name"] = admin["name"]
-
-    content["admin_review"] = admin_review
-    b.content_blocks = content
-    
-    from sqlalchemy.orm.attributes import flag_modified
-    flag_modified(b, "content_blocks")
-    
-    db.commit()
-    return {"ok": True, "comment": new_feedback}
-
-
 @router.post("/blogs/{blog_id}/draft", response_model=dict)
 async def change_to_draft(blog_id: str, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     b_id = _parse_id(blog_id)
@@ -418,11 +271,29 @@ async def change_to_draft(blog_id: str, user: dict = Depends(get_current_user), 
     db.commit()
     return {"ok": True, "status": "saved"}
 
-
 @router.get("/public/blogs", response_model=dict)
-async def list_public_blogs(page: int = Query(1, ge=1), limit: int = Query(10, ge=1, le=50), db: Session = Depends(get_db)):
+async def list_public_blogs(
+    page: int = Query(1, ge=1), 
+    limit: int = Query(10, ge=1, le=50), 
+    authorization: str = Header(None), 
+    db: Session = Depends(get_db)
+):
+    if not authorization or not authorization.startswith("Bearer sk_live_"):
+        raise HTTPException(status_code=401, detail="Missing or invalid API Key. Format: 'Bearer sk_live_...'")
+        
+    api_key = authorization.replace("Bearer ", "").strip()
+    
+    db_key = db.query(TenantAPIKey).filter(TenantAPIKey.api_key == api_key).first()
+    if not db_key:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
+        
+    tenant_id = db_key.tenant_id
+
     skip = (page - 1) * limit
-    query = db.query(BlogPost).filter(BlogPost.status == "published")
+    query = db.query(BlogPost).filter(
+        BlogPost.tenant_id == tenant_id,
+        BlogPost.status == "published"
+    )
     
     total = query.count()
     blogs = query.order_by(desc(BlogPost.updated_at)).offset(skip).limit(limit).all()
@@ -433,11 +304,21 @@ async def list_public_blogs(page: int = Query(1, ge=1), limit: int = Query(10, g
         meta = content.get("meta", {})
         render = content.get("final_blog", {}).get("render", {})
         
+        cover_url = b.cover_image_url or meta.get("cover_image_url") or render.get("cover_image_url") or ""
+        
+        if not cover_url:
+            match = re.search(r"!\[.*?\]\((.*?)\)", str(content))
+            if match:
+                cover_url = match.group(1).split(" ")[0].strip()
+
+        raw_intro = render.get("intro_md", "") or meta.get("intro_md", "")
+        clean_intro = re.sub(r"!\[.*?\]\(.*?\)", "", raw_intro).strip()
+        
         items.append({
             "id": str(b.id),
             "title": render.get("title", "") or meta.get("title", ""),
-            "cover_image_url": render.get("cover_image_url", ""),
-            "intro": render.get("intro_md", ""),
+            "cover_image_url": cover_url,
+            "intro": clean_intro,
             "author": b.author_name,
             "category": meta.get("focus_or_niche", "Technology"),
             "published_at": content.get("admin_review", {}).get("reviewed_at"),

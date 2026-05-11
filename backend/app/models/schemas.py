@@ -64,7 +64,7 @@ class TokenOut(BaseModel):
 class YoutubeBlogIn(BaseModel):
     youtube_url: str
     tone: Optional[str] = "Formal"
-    language: Optional[str] = "English"
+    language: str = "English"
     image_count: Optional[int] = 0
 
 class FinalBlog(BaseModel):
@@ -73,7 +73,7 @@ class FinalBlog(BaseModel):
 
 # Metadata that came from your multi-step form (final selected/manual only)
 class BlogMeta(BaseModel):
-    language: Literal["English"] = "English"  
+    language: str = "English"
     tone: str
     creativity: str
 
@@ -143,6 +143,7 @@ AI_OPTIONS_MAX = 10
 
 class TopicIdeasIn(BaseModel):
     # first page dialog box input
+    language: str = "English"
     focus_or_niche: str = Field(min_length=3)
     targeted_keyword: str = ""
     targeted_audience: str = ""
@@ -154,6 +155,7 @@ class TopicIdeasIn(BaseModel):
 
 
 class TitlesIn(BaseModel):
+    language: str = "English"
     tone: str
     creativity: str
     focus_or_niche: str
@@ -164,6 +166,7 @@ class TitlesIn(BaseModel):
 
 
 class ImagePromptsIn(BaseModel):
+    
     tone: str
     creativity: str
     focus_or_niche: str
@@ -175,6 +178,7 @@ class ImagePromptsIn(BaseModel):
 
 
 class IntrosIn(BaseModel):
+    language: str = "English"
     tone: str
     creativity: str
     focus_or_niche: str
@@ -186,6 +190,7 @@ class IntrosIn(BaseModel):
 
 
 class OutlinesIn(BaseModel):
+    language: str = "English"
     tone: str
     creativity: str
     focus_or_niche: str
@@ -229,6 +234,7 @@ class GenerateBlogIn(BaseModel):
     """
     Called on 'Generate Blog' button from review page.
     """
+    language: str = "English"
     tone: str
     creativity: str
     focus_or_niche: str

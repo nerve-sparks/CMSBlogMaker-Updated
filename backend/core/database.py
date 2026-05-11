@@ -5,13 +5,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Verify that the database URL is present
 if not settings.DATABASE_URL:
     logger.error("DATABASE_URL is missing from environment variables.")
     raise ValueError("DATABASE_URL must be configured.")
 
-# Create the SQLAlchemy engine
-# pool_pre_ping=True ensures the connection is alive before executing a query
 try:
     engine = create_engine(
         settings.DATABASE_URL, 
@@ -24,10 +21,10 @@ except Exception as e:
     logger.error("Failed to configure database engine: %s", str(e))
     raise
 
-# Create a configured "Session" class
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create a Base class for our models to inherit from
+
 Base = declarative_base()
 
 def get_db():
