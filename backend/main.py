@@ -122,6 +122,6 @@ api_app.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Create root app AND ATTACH THE LIFESPAN HERE
 app = FastAPI(lifespan=lifespan)
-app.mount("/", api_app)
-
+# app.mount("/cms-backend", api_app) 
+app.mount("/cms-backend", api_app) 
 

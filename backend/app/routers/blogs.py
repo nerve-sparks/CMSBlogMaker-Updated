@@ -140,9 +140,33 @@ async def blog_stats(user: dict = Depends(get_current_user), db: Session = Depen
         "generated_images": images_count,
     }
 
+MAX_MB = 5
+MAX_BYTES = MAX_MB * 1024 * 1024
+
 @router.post("/blogs/uploads/images", response_model=dict)
-async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+async def upload_image(
+    file: UploadFile = File(...), 
+    content_length: int = Header(None), # Grabs the file size from the request header
+    user: dict = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    # 1. Quick Reject: Stop it before it even downloads if the header says it's too big
+    if content_length and content_length > MAX_BYTES:
+        raise HTTPException(
+            status_code=413, 
+            detail=f"Image is too large. Maximum allowed size is {MAX_MB}MB."
+        )
+
+    # 2. Deep Verification: Read the file securely
     data = await file.read()
+    
+    if len(data) > MAX_BYTES:
+        raise HTTPException(
+            status_code=413, 
+            detail=f"Image is too large. Maximum allowed size is {MAX_MB}MB."
+        )
+
+    # 3. Process and Upload to GCS
     ext = os.path.splitext(file.filename or "")[-1].lower()
     if not ext:
         ext = ".png"
