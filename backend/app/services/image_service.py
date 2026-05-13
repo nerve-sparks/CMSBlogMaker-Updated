@@ -156,10 +156,7 @@ def _prepare_image(data: bytes, mime_type: str | None) -> tuple[bytes, str]:
     ext = _extension_from_bytes(normalized, mime_type)
     return normalized, ext
 
-
 async def generate_cover_image(payload: dict) -> dict:
-    os.makedirs("uploads", exist_ok=True)
-
     # Use the exact prompt the user provided, no matter where it came from
     user_prompt = payload.get('prompt', '').strip()
     
@@ -167,14 +164,13 @@ async def generate_cover_image(payload: dict) -> dict:
     if not user_prompt:
          user_prompt = "A professional high-quality blog cover image."
 
-   
     final_prompt = dedent(f"""
-    Create a high-quality, professional blog cover image.
-    Visual Description: {user_prompt}
-    Primary color theme: {payload.get('primary_color', '#000000')}
-    Style: Editorial illustration, cinematic lighting.
-    Constraints: NO text, NO watermarks, NO logos.
-    """).lstrip("\n")
+        Professional blog header illustration.
+        Subject: {user_prompt}
+        Color palette: {payload.get('primary_color', 'vibrant colors')}
+        Style: Clean, modern, high-quality digital art.
+        Note: No text, no logos.
+    """).strip()
 
     def run_sync_generation():
         try:
@@ -182,27 +178,18 @@ async def generate_cover_image(payload: dict) -> dict:
             aspect_ratio_str = payload.get("aspect_ratio", "1:1")
             model_name = settings.GEMINI_IMAGE_MODEL
             
-            logger.info(f"Attempting to generate image with Paid Gemini Model: {model_name}")
+            logger.info(f"Attempting to generate image with Gemini model: {model_name}")
 
-            
-            if "imagen" in model_name.lower():
-                result = client.models.generate_images(
-                    model=model_name, 
-                    prompt=final_prompt,
-                    config=types.GenerateImagesConfig(
-                        number_of_images=1,
-                        aspect_ratio=aspect_ratio_str,
-                        output_mime_type="image/png",
-                        person_generation="ALLOW_ADULT" 
-                    )
-                )
-                if not result or not result.generated_images:
-                    raise RuntimeError("Gemini returned an empty image list.")
-                image_bytes = result.generated_images[0].image.image_bytes
-                
-            else:
-                cfg = types.GenerateContentConfig(
+            #  Use native ImageConfig for Gemini 2.5 Flash Image!
+            # Do NOT append the aspect ratio to the text prompt anymore.
+            result = client.models.generate_content(
+                model=model_name, 
+                contents=[final_prompt], 
+                config=types.GenerateContentConfig(
                     response_modalities=["IMAGE"],
+                    image_config=types.ImageConfig(
+                        aspect_ratio=aspect_ratio_str,
+                    ),
                     safety_settings=[
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
@@ -210,35 +197,44 @@ async def generate_cover_image(payload: dict) -> dict:
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                     ]
                 )
-                prompt_with_ratio = final_prompt + f"\nASPECT RATIO: {aspect_ratio_str}"
-                
-                result = client.models.generate_content(
-                    model=model_name, 
-                    contents=[prompt_with_ratio],
-                    config=cfg,
-                )
-                if not result or not result.parts or not result.parts[0].inline_data:
-                    raise RuntimeError("Gemini multimodal returned an empty or blocked response.")
-                image_bytes = result.parts[0].inline_data.data
+            )
+            
+            # UPDATE THIS PART in your run_sync_generation (Gemini section)
+            image_bytes = None
+            try:
+                if hasattr(result, "parts") and result.parts:
+                    for part in result.parts:
+                        if hasattr(part, "inline_data") and part.inline_data:
+                            image_bytes = part.inline_data.data
+                            break
+            except Exception as e:
+                logger.error(f"Error parsing Gemini parts: {e}")
 
-            for part in resp.parts:
+            if not image_bytes:
+                # This will trigger the fallback to OpenAI
+                raise RuntimeError("Gemini safety filters blocked this prompt.")
+
+ for part in resp.parts:
                 if part.inline_data is not None:
+                    # Safely extract image bytes and extension
                     raw_bytes, ext = _prepare_image(part.inline_data.data, part.inline_data.mime_type)
                     filename = f"{uuid.uuid4().hex}.{ext}"
                     content_type = _content_type_from_ext(ext)
-                    image_url = upload_bytes_to_gcs(raw_bytes, filename, content_type)
-
+                    
+                    # Upload directly to Google Cloud Storage
+                    cloud_url = upload_bytes_to_gcs(raw_bytes, filename, content_type)
+                    
                     return {
-                        "image_url": image_url,
+                        "image_url": cloud_url,
                         "meta": {
-                            "aspect_ratio": payload["aspect_ratio"],
-                            "quality": payload["quality"],
-                            "primary_color": payload["primary_color"],
+                            "aspect_ratio": payload.get("aspect_ratio", "1:1"),
+                            "quality": payload.get("quality", "standard"),
+                            "primary_color": payload.get("primary_color", ""),
                             "model": settings.GEMINI_IMAGE_MODEL,
-                            "prompt": payload["prompt"],
+                            "prompt": payload.get("prompt", ""),
                         },
                     }
-
+            
             raise RuntimeError("Image model did not return an image in the response parts.")
         
         except Exception as e:
@@ -256,7 +252,6 @@ async def generate_cover_image(payload: dict) -> dict:
             quality_map = {"low": "standard", "medium": "standard", "high": "hd"}
             dall_e_quality = quality_map.get(payload.get("quality", "standard"), "hd")
             
-            # Pass the user's prompt directly to DALL-E
             try:
                 response = openai_client.images.generate(
                     model=settings.OPENAI_IMAGE_MODEL,
@@ -265,27 +260,24 @@ async def generate_cover_image(payload: dict) -> dict:
                     quality=dall_e_quality,
                     n=1,
                 )
-                image_url = response.data[0].url
-                img_response = requests.get(image_url, stream=True, timeout=30)
+                temp_url = response.data[0].url
+                img_response = requests.get(temp_url, stream=True, timeout=30)
                 img_response.raise_for_status()
+                image_bytes = img_response.content
                 
-                img = Image.open(BytesIO(img_response.content))
                 filename = f"{uuid.uuid4().hex}.png"
-                buf = BytesIO()
-                img.save(buf, "PNG")
-                image_url = upload_bytes_to_gcs(buf.getvalue(), filename, "image/png")
+            cloud_url = upload_bytes_to_gcs(image_bytes, filename, "image/png")
 
-                return {
-                    "image_url": image_url,
-                    "meta": {
-                        "aspect_ratio": payload.get("aspect_ratio", "1:1"),
-                        "quality": payload.get("quality", "standard"),
-                        "primary_color": payload.get("primary_color", ""),
-                        "model": settings.OPENAI_IMAGE_MODEL,
-                        "prompt": user_prompt, # Return the original user prompt
-                    },
-                }
+            return {
+                "image_url": cloud_url,
+                "meta": {
+                    "aspect_ratio": payload.get("aspect_ratio", "1:1"),
+                    "quality": payload.get("quality", "standard"),
+                    "primary_color": payload.get("primary_color", ""),
+                    "model": settings.OPENAI_IMAGE_MODEL,
+                    "prompt": user_prompt,
+                },
+            }
             except Exception as openai_error:
                 raise RuntimeError(f"Gemini error: {e}. OpenAI error: {str(openai_error)}")
-
     return await asyncio.to_thread(run_sync_generation)
