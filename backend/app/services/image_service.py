@@ -214,20 +214,28 @@ async def generate_cover_image(payload: dict) -> dict:
                 # This will trigger the fallback to OpenAI
                 raise RuntimeError("Gemini safety filters blocked this prompt.")
 
-            # Upload directly to Google Cloud Storage
-            filename = f"{uuid.uuid4().hex}.png"
-            cloud_url = upload_bytes_to_gcs(image_bytes, filename, "image/png")
-
-            return {
-                "image_url": cloud_url,
-                "meta": {
-                    "aspect_ratio": aspect_ratio_str,
-                    "quality": payload.get("quality", "standard"),
-                    "primary_color": payload.get("primary_color", ""),
-                    "model": model_name,
-                    "prompt": user_prompt,
-                },
-            }
+ for part in resp.parts:
+                if part.inline_data is not None:
+                    # Safely extract image bytes and extension
+                    raw_bytes, ext = _prepare_image(part.inline_data.data, part.inline_data.mime_type)
+                    filename = f"{uuid.uuid4().hex}.{ext}"
+                    content_type = _content_type_from_ext(ext)
+                    
+                    # Upload directly to Google Cloud Storage
+                    cloud_url = upload_bytes_to_gcs(raw_bytes, filename, content_type)
+                    
+                    return {
+                        "image_url": cloud_url,
+                        "meta": {
+                            "aspect_ratio": payload.get("aspect_ratio", "1:1"),
+                            "quality": payload.get("quality", "standard"),
+                            "primary_color": payload.get("primary_color", ""),
+                            "model": settings.GEMINI_IMAGE_MODEL,
+                            "prompt": payload.get("prompt", ""),
+                        },
+                    }
+            
+            raise RuntimeError("Image model did not return an image in the response parts.")
         
         except Exception as e:
             logger.warning(f"Gemini image generation failed: {e}. Falling back to OpenAI DALL-E.")
@@ -236,7 +244,8 @@ async def generate_cover_image(payload: dict) -> dict:
                 raise RuntimeError(f"Gemini error: {e}. OpenAI API key not configured.")
             
             aspect_ratio_map = {
-                "1:1": "1024x1024", "4:3": "1792x1024", "16:9": "1792x1024", 
+                "1:1": "1024x1024",
+                "4:3": "1792x1024", "16:9": "1792x1024",
                 "3:4": "1024x1792", "9:16": "1024x1792",
             }
             size = aspect_ratio_map.get(payload.get("aspect_ratio", "1:1"), "1024x1024")
@@ -257,18 +266,18 @@ async def generate_cover_image(payload: dict) -> dict:
                 image_bytes = img_response.content
                 
                 filename = f"{uuid.uuid4().hex}.png"
-                cloud_url = upload_bytes_to_gcs(image_bytes, filename, "image/png")
-                
-                return {
-                    "image_url": cloud_url,
-                    "meta": {
-                        "aspect_ratio": payload.get("aspect_ratio", "1:1"),
-                        "quality": payload.get("quality", "standard"),
-                        "primary_color": payload.get("primary_color", ""),
-                        "model": settings.OPENAI_IMAGE_MODEL,
-                        "prompt": user_prompt,
-                    },
-                }
+            cloud_url = upload_bytes_to_gcs(image_bytes, filename, "image/png")
+
+            return {
+                "image_url": cloud_url,
+                "meta": {
+                    "aspect_ratio": payload.get("aspect_ratio", "1:1"),
+                    "quality": payload.get("quality", "standard"),
+                    "primary_color": payload.get("primary_color", ""),
+                    "model": settings.OPENAI_IMAGE_MODEL,
+                    "prompt": user_prompt,
+                },
+            }
             except Exception as openai_error:
                 raise RuntimeError(f"Gemini error: {e}. OpenAI error: {str(openai_error)}")
     return await asyncio.to_thread(run_sync_generation)

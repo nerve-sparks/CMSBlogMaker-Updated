@@ -198,6 +198,18 @@ async def gen_image_prompts(payload: dict) -> List[str]:
 # Final blog generation returns ONE markdown (not 5)
 async def gen_final_blog_markdown(payload: dict) -> str:
     refs = payload.get("reference_links", "")
+    cover = payload.get("cover_image_url", "")
+    title = payload["title"]
+
+    cover_rule = (
+        f'- Second element must be {{"type": "image", "url": "{cover}", "alt": "Cover"}}'
+        if cover else ""
+    )
+    refs_rule = (
+        '- End with a {"type": "h2", "content": "References"} block followed by a {"type": "ul", "items": [...]} block with the reference links'
+        if refs else ""
+    )
+
     prompt = dedent(f"""
     {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
     Focus/Niche: {payload['focus_or_niche']}
