@@ -152,6 +152,7 @@ class TopicIdeasIn(BaseModel):
     tone: str
     creativity: str
     count: int = Field(default=AI_OPTIONS_COUNT, ge=1, le=AI_OPTIONS_MAX)
+    session_id: Optional[str] = None  # shared across full blog workflow for grouping in Langfuse
 
 
 class TitlesIn(BaseModel):
@@ -163,6 +164,7 @@ class TitlesIn(BaseModel):
     targeted_audience: str = ""
     reference_links: str = ""
     selected_idea: str
+    session_id: Optional[str] = None
 
 
 class ImagePromptsIn(BaseModel):
@@ -175,6 +177,7 @@ class ImagePromptsIn(BaseModel):
     reference_links: str = ""
     selected_idea: str
     title: str
+    session_id: Optional[str] = None
 
 
 class IntrosIn(BaseModel):
@@ -187,6 +190,7 @@ class IntrosIn(BaseModel):
     reference_links: str = ""
     selected_idea: str
     title: str
+    session_id: Optional[str] = None
 
 
 class OutlinesIn(BaseModel):
@@ -200,6 +204,7 @@ class OutlinesIn(BaseModel):
     selected_idea: str
     title: str
     intro_md: str
+    session_id: Optional[str] = None
 
 
 class ImageGenerateIn(BaseModel):
@@ -217,6 +222,7 @@ class ImageGenerateIn(BaseModel):
     primary_color: str = "#4443E4"
     source: Literal["blog", "nano"] = "nano"
     save_to_gallery: bool = True
+    session_id: Optional[str] = None
 
 
 class ImageSaveIn(BaseModel):
@@ -252,6 +258,7 @@ class GenerateBlogIn(BaseModel):
 
     cover_image_url: str = ""
     primary_color: str = "#4443E4"
+    session_id: Optional[str] = None
 
 
 class OptionsOut(BaseModel):

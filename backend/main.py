@@ -1,18 +1,66 @@
 from contextlib import asynccontextmanager
 import os
+import sys
 import asyncio
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from core.config import settings
 from core.database import engine, SessionLocal  #  Added SessionLocal here!
 from core import models
 from core.models import BlogPost #  Added BlogPost here!
 from app.routers import auth, ai, blogs, admin, images
+
+# Langfuse session grouping helpers
+_backend_root = os.path.dirname(os.path.abspath(__file__))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
+try:
+    import jwt as _jwt
+    from blog_session_store import get_or_create_session_id
+    from langfuse_tracer import set_current_session_id as _lf_set_session
+    _LANGFUSE_SESSION_ENABLED = True
+except Exception:
+    _LANGFUSE_SESSION_ENABLED = False
+
+
+class LangfuseSessionMiddleware(BaseHTTPMiddleware):
+    """
+    Runs before every request. For AI routes:
+    1. Reads JWT from Authorization header (no signature check — just reading sub)
+    2. Maps user_id → stable session_id via blog_session_store (2-hour TTL)
+    3. Writes session_id to ContextVar via set_current_session_id()
+
+    Result: all @observe-decorated handlers called by the same user within
+    the TTL window get the same Langfuse trace_id, making them appear as
+    observations under ONE parent trace in the Langfuse dashboard.
+    """
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        is_ai_route = "/ai/" in path or path.endswith("/ai")
+        if _LANGFUSE_SESSION_ENABLED and is_ai_route:
+            try:
+                auth_header = request.headers.get("authorization", "")
+                if auth_header.lower().startswith("bearer "):
+                    token = auth_header[7:].strip()
+                    # Decode without verification — we only need the sub claim
+                    payload = _jwt.decode(
+                        token, options={"verify_signature": False}
+                    )
+                    user_id = payload.get("sub") or payload.get("user_id")
+                    if user_id:
+                        sid = get_or_create_session_id(str(user_id))
+                        _lf_set_session(sid)
+            except Exception:
+                pass  # Never block the request
+        return await call_next(request)
+
 
 # Create the PostgreSQL tables based on our models
 models.Base.metadata.create_all(bind=engine)
@@ -110,6 +158,10 @@ api_app.add_middleware(
 os.makedirs("uploads", exist_ok=True)
 api_app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+# Must be added AFTER CORSMiddleware but BEFORE route handlers
+if _LANGFUSE_SESSION_ENABLED:
+    api_app.add_middleware(LangfuseSessionMiddleware)
+
 @api_app.get("/health")
 async def health_check():
     return {"status": "healthy, CI/CD running", "service": "cms-backend"}
@@ -122,6 +174,6 @@ api_app.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Create root app AND ATTACH THE LIFESPAN HERE
 app = FastAPI(lifespan=lifespan)
-# app.mount("/cms-backend", api_app) 
-app.mount("/", api_app) 
+app.mount("/cms-backend", api_app) 
+# app.mount("/", api_app) 
 

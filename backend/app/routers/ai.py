@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+import sys
+import os
 from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -15,8 +17,15 @@ from app.services.gemini_service import (
     gen_image_prompts, gen_final_blog_markdown, gen_youtube_blog_json
 )
 from app.services.image_service import generate_cover_image
-# REMOVED FIRESTORE IMPORT - THIS WAS THE CRASH CAUSE
 from core.deps import get_current_user
+
+# Add backend root to path so langfuse modules are importable
+_backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
+from langfuse_observer import observe
+from langfuse_tracer import set_current_input_data
 
 logger = logging.getLogger(__name__)
 
@@ -57,63 +66,75 @@ def _raise_ai_error(err: Exception):
 
 
 @router.post("/ideas", response_model=OptionsOut)
+@observe(name="api_topic_ideas", as_type="pipeline")
 async def topic_ideas(payload: TopicIdeasIn):
     try:
-        options = await gen_topic_ideas(payload.model_dump())
+        data = payload.model_dump()
+        set_current_input_data(data)
+        options = await gen_topic_ideas(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
 
 
 @router.post("/titles", response_model=OptionsOut)
+@observe(name="api_titles", as_type="pipeline")
 async def titles(payload: TitlesIn):
     try:
-        options = await gen_titles(payload.model_dump())
+        data = payload.model_dump()
+        set_current_input_data(data)
+        options = await gen_titles(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
 
 
 @router.post("/intros", response_model=OptionsOut)
+@observe(name="api_intros", as_type="pipeline")
 async def intros(payload: IntrosIn):
     try:
-        options = await gen_intros(payload.model_dump())
+        data = payload.model_dump()
+        set_current_input_data(data)
+        options = await gen_intros(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
 
 
 @router.post("/outlines", response_model=dict)
+@observe(name="api_outlines", as_type="pipeline")
 async def outlines(payload: OutlinesIn):
     try:
-        options = await gen_outlines(payload.model_dump())
+        data = payload.model_dump()
+        set_current_input_data(data)
+        options = await gen_outlines(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
 
 
 @router.post("/image-prompts", response_model=OptionsOut)
+@observe(name="api_image_prompts", as_type="pipeline")
 async def image_prompts(payload: ImagePromptsIn):
     try:
-        options = await gen_image_prompts(payload.model_dump())
+        data = payload.model_dump()
+        set_current_input_data(data)
+        options = await gen_image_prompts(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
 
 
 @router.post("/image-generate", response_model=ImageOut)
+@observe(name="api_image_generate", as_type="pipeline")
 async def image_generate(payload: ImageGenerateIn, user: dict = Depends(get_current_user)):
     try:
         data = payload.model_dump()
+        set_current_input_data({k: v for k, v in data.items() if k != "save_to_gallery"})
         save_to_gallery = data.pop("save_to_gallery", True)
-        
-        # 1. This calls your bulletproof image_service with DALL-E fallback
         result = await generate_cover_image(data)
-        
-        
         if save_to_gallery:
             logger.info(f"Image generated for user {user.get('id')}. Skipping Firestore, ready for Postgres.")
-            
         return result
     except Exception as e:
         logger.error(f"Image generation failed: {str(e)}", exc_info=True)
@@ -150,9 +171,11 @@ def _extract_youtube_transcript(url: str) -> str:
         return ""
 
 @router.post("/youtube-to-blog")
+@observe(name="api_youtube_to_blog", as_type="pipeline")
 async def youtube_to_blog(payload: YoutubeBlogIn, user: dict = Depends(get_current_user)):
     try:
         data = payload.model_dump()
+        set_current_input_data(data)
         transcript = _extract_youtube_transcript(data["youtube_url"])
         if not transcript:
             raise HTTPException(status_code=400, detail="Could not extract transcript.")
@@ -177,9 +200,11 @@ async def youtube_to_blog(payload: YoutubeBlogIn, user: dict = Depends(get_curre
 
 
 @router.post("/blog-generate")
+@observe(name="api_blog_generate", as_type="pipeline")
 async def blog_generate(payload: GenerateBlogIn):
     try:
         payload_dict = payload.model_dump()
+        set_current_input_data(payload_dict)
         if payload.youtube_url:
             transcript = _extract_youtube_transcript(payload.youtube_url)
             if transcript:

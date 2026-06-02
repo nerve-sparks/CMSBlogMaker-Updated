@@ -1,12 +1,22 @@
 from typing import List
 from textwrap import dedent
 import json
+import sys
+import os
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from core.config import settings
 from app.models.schemas import AI_OPTIONS_COUNT
+
+# Add backend root to path so langfuse modules are importable
+_backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
+from langfuse_observer import observe
+from langfuse_tracer import set_current_usage_metrics, set_current_system_prompt
 
 # Initialize client lazily to avoid import errors if API key is missing
 _client = None
@@ -32,6 +42,19 @@ def _sys(tone: str, creativity: str) -> str:
         "Return ONLY valid JSON according to the schema.\n"
     )
 
+def _capture_openai_usage(response):
+    """Forward OpenAI usage metrics to Langfuse (best effort)."""
+    try:
+        if response.usage:
+            set_current_usage_metrics({
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }, model=settings.OPENAI_TEXT_MODEL)
+    except Exception:
+        pass
+
+@observe(name="gen_topic_ideas_openai", as_type="generation")
 async def gen_topic_ideas(payload: dict) -> List[str]:
     prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
@@ -55,10 +78,13 @@ async def gen_topic_ideas(payload: dict) -> List[str]:
         response_format={"type": "json_object"},
         temperature=0.7,
     )
+
+    _capture_openai_usage(response)
     
     result = json.loads(response.choices[0].message.content)
     return result.get("options", [])
 
+@observe(name="gen_titles_openai", as_type="generation")
 async def gen_titles(payload: dict) -> List[str]:
     prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
@@ -82,10 +108,13 @@ async def gen_titles(payload: dict) -> List[str]:
         response_format={"type": "json_object"},
         temperature=0.7,
     )
+
+    _capture_openai_usage(response)
     
     result = json.loads(response.choices[0].message.content)
     return result.get("options", [])
 
+@observe(name="gen_intros_openai", as_type="generation")
 async def gen_intros(payload: dict) -> List[str]:
     prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
@@ -110,6 +139,8 @@ async def gen_intros(payload: dict) -> List[str]:
         response_format={"type": "json_object"},
         temperature=0.7,
     )
+
+    _capture_openai_usage(response)
     
     result = json.loads(response.choices[0].message.content)
     return result.get("options", [])
@@ -120,6 +151,7 @@ class _OutlineVariant(BaseModel):
 class _OutlineOptions(BaseModel):
     options: List[_OutlineVariant] = Field(min_length=AI_OPTIONS_COUNT, max_length=AI_OPTIONS_COUNT)
 
+@observe(name="gen_outlines_openai", as_type="generation")
 async def gen_outlines(payload: dict):
     prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
@@ -147,10 +179,13 @@ async def gen_outlines(payload: dict):
         response_format={"type": "json_object"},
         temperature=0.7,
     )
+
+    _capture_openai_usage(response)
     
     result = json.loads(response.choices[0].message.content)
     return result.get("options", [])
 
+@observe(name="gen_image_prompts_openai", as_type="generation")
 async def gen_image_prompts(payload: dict) -> List[str]:
     prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
@@ -174,15 +209,22 @@ async def gen_image_prompts(payload: dict) -> List[str]:
         response_format={"type": "json_object"},
         temperature=0.7,
     )
+
+    _capture_openai_usage(response)
     
     result = json.loads(response.choices[0].message.content)
     return result.get("options", [])
 
 # Final blog generation returns ONE markdown (not 5)
+@observe(name="gen_final_blog_markdown_openai", as_type="generation")
 async def gen_final_blog_markdown(payload: dict) -> str:
     refs = payload.get("reference_links", "")
+
+    system_prompt_text = _sys(payload['tone'], payload['creativity'])
+    set_current_system_prompt(system_prompt_text)
+
     prompt = dedent(f"""
-    {_sys(payload['tone'], payload['creativity'])}
+    {system_prompt_text}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
@@ -213,5 +255,7 @@ async def gen_final_blog_markdown(payload: dict) -> str:
         ],
         temperature=0.7,
     )
+
+    _capture_openai_usage(response)
     
     return (response.choices[0].message.content or "").strip()
