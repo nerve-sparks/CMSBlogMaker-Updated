@@ -237,7 +237,7 @@ async def gen_image_prompts(payload: dict) -> List[str]:
         raise
 
 # Final blog generation returns ONE markdown (not 5)
-@observe(name="gen_final_blog_markdown", as_type="generation")
+@observe(name="cms_blog_maker", as_type="generation")
 async def gen_final_blog_markdown(payload: dict) -> str:
     refs = payload.get("reference_links", "")
     cover = payload.get("cover_image_url", "")
