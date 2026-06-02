@@ -52,5 +52,5 @@ psycopg2-binary
 # =========================
 # Observability
 # =========================
-langfuse
+langfuse==4.6.1
 python-dotenv

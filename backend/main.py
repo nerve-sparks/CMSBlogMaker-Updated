@@ -24,7 +24,7 @@ if _backend_root not in sys.path:
 try:
     import jwt as _jwt
     from blog_session_store import get_or_create_session_id
-    from langfuse_tracer import set_current_session_id as _lf_set_session
+    from langfuse_tracer import set_current_session_id as _lf_set_session, set_current_trace_identity as _lf_set_identity
     _LANGFUSE_SESSION_ENABLED = True
 except Exception:
     _LANGFUSE_SESSION_ENABLED = False
@@ -36,6 +36,7 @@ class LangfuseSessionMiddleware(BaseHTTPMiddleware):
     1. Reads JWT from Authorization header (no signature check — just reading sub)
     2. Maps user_id → stable session_id via blog_session_store (2-hour TTL)
     3. Writes session_id to ContextVar via set_current_session_id()
+    4. Also sets user_id and tenant_id via set_current_trace_identity()
 
     Result: all @observe-decorated handlers called by the same user within
     the TTL window get the same Langfuse trace_id, making them appear as
@@ -54,9 +55,11 @@ class LangfuseSessionMiddleware(BaseHTTPMiddleware):
                         token, options={"verify_signature": False}
                     )
                     user_id = payload.get("sub") or payload.get("user_id")
+                    tenant_id = payload.get("tenant_id")
                     if user_id:
                         sid = get_or_create_session_id(str(user_id))
                         _lf_set_session(sid)
+                        _lf_set_identity(user_id=str(user_id), tenant_id=str(tenant_id) if tenant_id else None)
             except Exception:
                 pass  # Never block the request
         return await call_next(request)

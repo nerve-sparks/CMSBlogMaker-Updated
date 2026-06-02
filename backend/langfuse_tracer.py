@@ -35,7 +35,7 @@ logger = logging.getLogger("langfuse_tracer")
 _AGENT_METADATA: Dict[str, Any] = {
     "agent_id": 'cms_blog_maker',
     "workflow_id": 'wf_cms_blog',
-    "department": 'content',
+    "department": 'marketing',
     "task_type": 'blog_generation',
 }
 
@@ -226,6 +226,18 @@ def get_current_trace_identity() -> Dict[str, Optional[str]]:
         "user_id": identity.get("user_id"),
         "session_id": identity.get("session_id"),
     }
+
+
+def set_current_trace_identity(user_id: Optional[str] = None, tenant_id: Optional[str] = None, session_id: Optional[str] = None) -> None:
+    identity = _CURRENT_TRACE_IDENTITY.get() or {}
+    new_identity = dict(identity)
+    if user_id is not None:
+        new_identity["user_id"] = user_id
+    if tenant_id is not None:
+        new_identity["tenant_id"] = tenant_id
+    if session_id is not None:
+        new_identity["session_id"] = session_id
+    _CURRENT_TRACE_IDENTITY.set(new_identity)
 
 
 def _normalize_model_for_pricing(model: Optional[str]) -> Optional[str]:
