@@ -23,11 +23,14 @@ if _backend_root not in sys.path:
 
 try:
     import jwt as _jwt
-    from blog_session_store import get_or_create_session_id
+    from blog_session_store import get_or_create_session_id, reset_session_id
     from langfuse_tracer import set_current_session_id as _lf_set_session, set_current_trace_identity as _lf_set_identity
     _LANGFUSE_SESSION_ENABLED = True
 except Exception:
     _LANGFUSE_SESSION_ENABLED = False
+
+# Routes that start a brand-new blog — each must get its own fresh trace
+_BLOG_FINAL_ROUTES = ("/ai/blog-generate", "/ai/youtube-to-blog")
 
 
 class LangfuseSessionMiddleware(BaseHTTPMiddleware):
@@ -45,6 +48,8 @@ class LangfuseSessionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         is_ai_route = "/ai/" in path or path.endswith("/ai")
+        _user_id_for_reset = None
+
         if _LANGFUSE_SESSION_ENABLED and is_ai_route:
             try:
                 auth_header = request.headers.get("authorization", "")
@@ -57,12 +62,31 @@ class LangfuseSessionMiddleware(BaseHTTPMiddleware):
                     user_id = payload.get("sub") or payload.get("user_id")
                     tenant_id = payload.get("tenant_id")
                     if user_id:
+                        # Always reuse existing session so ALL steps of this
+                        # blog (ideas → titles → outlines → blog-generate) share
+                        # the SAME trace_id and appear under ONE trace.
                         sid = get_or_create_session_id(str(user_id))
                         _lf_set_session(sid)
                         _lf_set_identity(user_id=str(user_id), tenant_id=str(tenant_id) if tenant_id else None)
+
+                        # After a final-generation route completes, reset so the
+                        # NEXT blog starts with a fresh trace_id (new trace).
+                        is_final_route = any(path.endswith(r) for r in _BLOG_FINAL_ROUTES)
+                        if is_final_route:
+                            _user_id_for_reset = str(user_id)
             except Exception:
                 pass  # Never block the request
-        return await call_next(request)
+
+        response = await call_next(request)
+
+        # Post-response: rotate session so next blog → new trace
+        if _user_id_for_reset:
+            try:
+                reset_session_id(_user_id_for_reset)
+            except Exception:
+                pass
+
+        return response
 
 
 # Create the PostgreSQL tables based on our models
