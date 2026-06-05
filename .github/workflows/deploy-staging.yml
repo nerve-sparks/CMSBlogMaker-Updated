@@ -28,7 +28,7 @@ jobs:
 
             APP_DIR="/root/all-agents/CMSBlogMaker-Updated"
             BACKEND_DIR="$APP_DIR/backend"
-            BRANCH="test"
+            BRANCH="stage"
 
             echo "=== 1. Updating code ==="
             cd "$APP_DIR"
