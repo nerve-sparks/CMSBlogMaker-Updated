@@ -1,0 +1,57 @@
+name: Deploy CMS Blog Maker to Staging
+
+on:
+  push:
+    branches:
+      - stage
+    paths:
+      - backend/**
+      - .github/**
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_VM_HOST }}
+          username: ${{ secrets.STAGING_VM_USERNAME }}
+          key: ${{ secrets.STAGING_VM_SSH_KEY }}
+          port: ${{ secrets.STAGING_VM_PORT || 22 }}
+          timeout: 600s
+          command_timeout: 5m
+          script: |
+            set -e
+
+            APP_DIR="/root/all-agents/CMSBlogMaker-Updated"
+            BACKEND_DIR="$APP_DIR/backend"
+            BRANCH="test"
+
+            echo "=== 1. Updating code ==="
+            cd "$APP_DIR"
+            if [ ! -d ".git" ]; then
+              echo "ERROR: $APP_DIR is not a git repo. Clone it first."
+              exit 1
+            fi
+            git fetch origin "$BRANCH"
+            git checkout -f "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+            git clean -fd --exclude=".env" --exclude="*.env"
+            echo "Deployed commit: $(git rev-parse --short HEAD)"
+
+            echo "=== 2. Updating backend (conda env cms-backend) ==="
+            cd "$BACKEND_DIR"
+            if [ -f "$HOME/miniconda3/envs/cms-backend/bin/pip" ]; then
+              $HOME/miniconda3/envs/cms-backend/bin/pip install -r requirements.txt --quiet
+            else
+              $HOME/anaconda3/envs/cms-backend/bin/pip install -r requirements.txt --quiet
+            fi
+
+            echo "=== 3. Restarting service ==="
+            sudo systemctl restart cms-backend.service
+
+            echo "=== Done ==="
+            sudo systemctl status cms-backend.service --no-pager
