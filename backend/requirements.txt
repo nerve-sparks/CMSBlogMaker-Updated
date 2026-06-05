@@ -48,3 +48,5 @@ sqlalchemy
 psycopg2-binary
 youtube_transcript_api
 psycopg2-binary
+
+gunicorn
