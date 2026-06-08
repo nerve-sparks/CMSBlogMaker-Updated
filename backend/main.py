@@ -185,10 +185,6 @@ api_app.add_middleware(
 os.makedirs("uploads", exist_ok=True)
 api_app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# Must be added AFTER CORSMiddleware but BEFORE route handlers
-if _LANGFUSE_SESSION_ENABLED:
-    api_app.add_middleware(LangfuseSessionMiddleware)
-
 @api_app.get("/health")
 async def health_check():
     return {"status": "healthy, CI/CD running", "service": "cms-backend"}
@@ -201,6 +197,12 @@ api_app.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Create root app AND ATTACH THE LIFESPAN HERE
 app = FastAPI(lifespan=lifespan)
-# app.mount("/cms-backend", api_app) 
-app.mount("/", api_app) 
+app.mount("/", api_app)
+
+# Middleware must be on the ROOT app so ContextVar values set here propagate
+# correctly to route handlers. Adding it to the mounted sub-app (api_app)
+# breaks ContextVar propagation due to how Starlette's BaseHTTPMiddleware
+# isolates context in sub-app scopes.
+if _LANGFUSE_SESSION_ENABLED:
+    app.add_middleware(LangfuseSessionMiddleware) 
 
