@@ -49,4 +49,9 @@ psycopg2-binary
 youtube_transcript_api
 psycopg2-binary
 
+# =========================
+# Observability
+# =========================
+langfuse==4.6.1
+python-dotenv
 gunicorn

@@ -1,13 +1,23 @@
-from typing import List
+from typing import List, Optional
 from textwrap import dedent
 import logging
 import json
+import sys
+import os
 
 import google.generativeai as genai
 from pydantic import BaseModel, Field, create_model
 
 from core.config import settings
 from app.models.schemas import AI_OPTIONS_COUNT
+
+# Add backend root to path so langfuse modules are importable
+_backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
+from langfuse_observer import observe
+from langfuse_tracer import set_current_usage_metrics, set_current_system_prompt
 
 
 def _get_model() -> "genai.GenerativeModel":
@@ -38,10 +48,31 @@ def _sys(tone: str, creativity: str, language: str = "English") -> str:
     )
 
 
-def _call_json_model(prompt: str) -> dict:
+def _call_json_model(prompt: str, system_prompt: Optional[str] = None) -> dict:
     """Call Gemini and parse JSON response from text."""
     model = _get_model()
+
+    # Capture system prompt in Langfuse metadata (best effort)
+    try:
+        if system_prompt:
+            set_current_system_prompt(system_prompt)
+    except Exception:
+        pass
+
     resp = model.generate_content(prompt)
+
+    # Forward token usage to Langfuse (best effort)
+    try:
+        usage_meta = getattr(resp, "usage_metadata", None)
+        if usage_meta:
+            set_current_usage_metrics({
+                "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                "total_tokens": getattr(usage_meta, "total_token_count", None),
+            }, model=settings.GEMINI_TEXT_MODEL)
+    except Exception:
+        pass
+
     text = (resp.text or "").strip()
     
     # Find where the JSON actually begins
@@ -61,9 +92,11 @@ def _call_json_model(prompt: str) -> dict:
         raise
 
 
+@observe(name="gen_topic_ideas", as_type="generation")
 async def gen_topic_ideas(payload: dict) -> List[str]:
+    sys_prompt = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
     prompt = dedent(f"""
-    {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
+    {sys_prompt}
     Focus/Niche: {payload['focus_or_niche']}
     Targeted keyword: {payload.get('targeted_keyword','')}
     Targeted audience: {payload.get('targeted_audience','')}
@@ -75,16 +108,18 @@ async def gen_topic_ideas(payload: dict) -> List[str]:
     Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
     """).lstrip("\n")
 
-    data = _call_json_model(prompt)
+    data = _call_json_model(prompt, system_prompt=sys_prompt)
     options = data.get("options") or []
     if not isinstance(options, list):
         raise ValueError("Gemini topic ideas response missing 'options' list")
     return [str(o) for o in options][:AI_OPTIONS_COUNT]
 
+@observe(name="gen_titles", as_type="generation")
 async def gen_titles(payload: dict) -> List[str]:
     try:
+        sys_prompt = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
         prompt = dedent(f"""
-        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
+        {sys_prompt}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -96,7 +131,7 @@ async def gen_titles(payload: dict) -> List[str]:
         Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt)
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini titles response missing 'options' list")
@@ -105,10 +140,12 @@ async def gen_titles(payload: dict) -> List[str]:
         logging.error(f"Error generating titles: {e}")
         raise
 
+@observe(name="gen_intros", as_type="generation")
 async def gen_intros(payload: dict) -> List[str]:
     try:
+        sys_prompt = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
         prompt = dedent(f"""
-        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
+        {sys_prompt}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -121,7 +158,7 @@ async def gen_intros(payload: dict) -> List[str]:
         Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt)
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini intros response missing 'options' list")
@@ -136,10 +173,12 @@ class _OutlineVariant(BaseModel):
 class _OutlineOptions(BaseModel):
     options: List[_OutlineVariant] = Field(min_length=AI_OPTIONS_COUNT, max_length=AI_OPTIONS_COUNT)
 
+@observe(name="gen_outlines", as_type="generation")
 async def gen_outlines(payload: dict):
     try:
+        sys_prompt = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
         prompt = dedent(f"""
-        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
+        {sys_prompt}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Audience: {payload.get('targeted_audience','')}
@@ -154,7 +193,7 @@ async def gen_outlines(payload: dict):
         Return a JSON object: {{"options": [{{"outline": [..] }}, ...]}}.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt)
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini outlines response missing 'options' list")
@@ -169,12 +208,14 @@ async def gen_outlines(payload: dict):
         logging.error(f"Error generating outlines: {e}")
         raise
 
+@observe(name="gen_image_prompts", as_type="generation")
 async def gen_image_prompts(payload: dict) -> List[str]:
     try:
         # Note: Image prompts are usually best kept in English for AI image generators, 
         # but we are passing the selected language just in case you want the user to see the options in their language.
+        sys_prompt = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
         prompt = dedent(f"""
-        {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
+        {sys_prompt}
         Focus/Niche: {payload['focus_or_niche']}
         Keyword: {payload.get('targeted_keyword','')}
         Selected idea: {payload['selected_idea']}
@@ -186,7 +227,7 @@ async def gen_image_prompts(payload: dict) -> List[str]:
         Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt)
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini image prompts response missing 'options' list")
@@ -196,6 +237,7 @@ async def gen_image_prompts(payload: dict) -> List[str]:
         raise
 
 # Final blog generation returns ONE markdown (not 5)
+@observe(name="cms_blog_maker", as_type="generation")
 async def gen_final_blog_markdown(payload: dict) -> str:
     refs = payload.get("reference_links", "")
     cover = payload.get("cover_image_url", "")
@@ -210,8 +252,11 @@ async def gen_final_blog_markdown(payload: dict) -> str:
         if refs else ""
     )
 
+    system_prompt_text = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
+    set_current_system_prompt(system_prompt_text)
+
     prompt = dedent(f"""
-    {_sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))}
+    {system_prompt_text}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
@@ -238,9 +283,23 @@ async def gen_final_blog_markdown(payload: dict) -> str:
         prompt,
         generation_config={"temperature": 0.7},
     )
+
+    # Forward token usage to Langfuse
+    try:
+        usage_meta = getattr(resp, "usage_metadata", None)
+        if usage_meta:
+            set_current_usage_metrics({
+                "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                "total_tokens": getattr(usage_meta, "total_token_count", None),
+            }, model=settings.GEMINI_TEXT_MODEL)
+    except Exception:
+        pass
+
     return (resp.text or "").strip()
 
 
+@observe(name="gen_youtube_blog_json", as_type="generation")
 async def gen_youtube_blog_json(payload: dict) -> dict:
     """
     Takes a YouTube transcript and user preferences, and generates a fully
@@ -249,6 +308,12 @@ async def gen_youtube_blog_json(payload: dict) -> dict:
     transcript = payload.get("youtube_transcript", "")
     tone = payload.get("tone", "Formal")
     language = payload.get("language", "English")
+
+    system_prompt_text = (
+        "You are an elite, senior technical blog writer.\n"
+        "Your task is to convert a YouTube video transcript into a highly engaging, structured blog post."
+    )
+    set_current_system_prompt(system_prompt_text)
     
     prompt = dedent(f"""
     You are an elite, senior technical blog writer.
