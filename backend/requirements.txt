@@ -54,3 +54,4 @@ psycopg2-binary
 # =========================
 langfuse==4.6.1
 python-dotenv
+gunicorn
