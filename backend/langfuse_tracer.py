@@ -417,12 +417,20 @@ class TraceContext:
             # This reliably attaches trace-level identity (user/session) in Langfuse.
             if trace_client:
                 logger.info("[trace:%s] using client.trace() identity path", self._name)
+                _trace_name = _AGENT_METADATA.get("agent_id", self._name)
                 _trace_kwargs: Dict[str, Any] = {
-                    "name": self._name,
+                    "name": _trace_name,
                     "session_id": self._session_id,
                     "user_id": self._user_id,
                     "metadata": self._metadata,
                 }
+                # Pin ALL observations for this user session to the SAME trace by
+                # passing id=session_id. Without this, every call creates a new trace.
+                if self._session_id:
+                    _raw_sid = self._session_id.replace("-", "").lower()
+                    if len(_raw_sid) == 32 and all(c in "0123456789abcdef" for c in _raw_sid):
+                        _trace_kwargs["id"] = _raw_sid
+                        logger.info("[trace:%s] pinned to trace_id=%s", self._name, _raw_sid)
                 if self._tags:
                     _trace_kwargs["tags"] = self._tags
                 self._trace = trace_client.trace(**_trace_kwargs)
