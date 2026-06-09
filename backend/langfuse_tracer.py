@@ -310,13 +310,25 @@ class LangfuseTracer:
         return self._client
 
     def trace_client(self):
-        """Return a client object that exposes trace(), if available."""
+        """Return a client object that exposes trace(), if available.
+
+        Returns None when start_as_current_observation is present so the
+        context-aware nesting path is used instead. That path correctly builds
+        the api_* → gen_* parent-child hierarchy under one trace; the flat
+        client.trace() path creates separate root-level traces.
+        """
         client = self.client
+        # Prefer start_as_current_observation (v3/v4) for proper nesting.
+        # Only fall back to the flat trace() path when that API is absent.
+        if client and hasattr(client, "start_as_current_observation"):
+            return None
         if client and hasattr(client, "trace"):
             return client
         if callable(get_client):
             try:
                 alt = get_client()
+                if alt and hasattr(alt, "start_as_current_observation"):
+                    return None
                 if alt and hasattr(alt, "trace"):
                     return alt
             except Exception:
@@ -440,86 +452,50 @@ class TraceContext:
                     metadata=self._metadata,
                 )
 
-            # --- Langfuse v3 SDK (Current) ---
+            # --- Langfuse v4 SDK ---
             elif hasattr(self._tracer.client, "start_as_current_observation"):
-                logger.info("[trace:%s] using start_as_current_observation() path", self._name)
-                # v3 strictly expects "span", "generation", or "event"
+                logger.info("[trace:%s] using propagate_attributes + start_as_current_observation() path", self._name)
                 v3_as_type = self._metadata.get("as_type", "span")
                 if v3_as_type not in ["span", "generation", "event"]:
                     v3_as_type = "span"
 
-                # Langfuse v4 uses public module-level propagate_attributes().
-                if self._session_id or self._user_id or self._tags:
-                    if callable(_lf_propagate_attributes):
-                        try:
-                            _prop_kwargs: Dict[str, Any] = {
-                                "user_id": self._user_id or None,
-                                "session_id": self._session_id,
-                                "trace_name": self._name,
-                            }
-                            if self._tags:
-                                _prop_kwargs["tags"] = self._tags
-                            self._propagation_context = _lf_propagate_attributes(**_prop_kwargs)
-                            self._propagation_context.__enter__()
-                            logger.info("[trace:%s] identity/tags propagation context entered", self._name)
-                        except Exception as prop_err:
-                            logger.warning("Failed to enter propagate_attributes context: %s", prop_err)
-                            self._propagation_context = None
-                    else:
+                # propagate_attributes sets trace name, session, user, and tags
+                # on the current trace context (does NOT accept trace_id in v4).
+                if callable(_lf_propagate_attributes):
+                    try:
+                        _trace_name = _AGENT_METADATA.get("agent_id", self._name)
+                        _prop_kwargs: Dict[str, Any] = {
+                            "trace_name": _trace_name,
+                            "user_id": self._user_id or None,
+                            "session_id": self._session_id or None,
+                        }
+                        if self._tags:
+                            _prop_kwargs["tags"] = self._tags
+                        self._propagation_context = _lf_propagate_attributes(**_prop_kwargs)
+                        self._propagation_context.__enter__()
+                        logger.info("[trace:%s] propagate_attributes context entered", self._name)
+                    except Exception as prop_err:
+                        logger.warning("Failed to enter propagate_attributes context: %s", prop_err)
                         self._propagation_context = None
+                else:
+                    self._propagation_context = None
 
-                try:
-                    # If session_id provided, use it as the fixed trace_id so all
-                    # spans from different HTTP requests share ONE parent trace.
-                    _obs_kwargs: Dict[str, Any] = dict(
-                        name=self._name,
-                        as_type=v3_as_type,
-                        input=self._metadata,
-                        metadata=self._metadata,
-                    )
-                    if self._session_id and LangfuseTraceContext:
-                        # Langfuse trace_id must be 32 lowercase hex chars (no dashes)
-                        _raw_sid = self._session_id.replace("-", "").lower()
-                        if len(_raw_sid) == 32 and all(c in "0123456789abcdef" for c in _raw_sid):
-                            _obs_kwargs["trace_context"] = LangfuseTraceContext(
-                                trace_id=_raw_sid,
-                            )
-                            logger.info("[trace:%s] pinned to trace_id=%s", self._name, _raw_sid)
-                        else:
-                            # session_id is not UUID-shaped — fall back to identity params
-                            _obs_kwargs["session_id"] = self._session_id
-                            _obs_kwargs["user_id"] = self._user_id
-                    else:
-                        # Fall back to passing session_id/user_id directly
-                        _obs_kwargs["session_id"] = self._session_id
-                        _obs_kwargs["user_id"] = self._user_id
-                    self._context_manager = self._tracer.client.start_as_current_observation(
-                        **_obs_kwargs
-                    )
-                except TypeError:
-                    self._context_manager = self._tracer.client.start_as_current_observation(
-                        name=self._name,
-                        as_type=v3_as_type,
-                        input=self._metadata,
-                        metadata=self._metadata,
-                    )
+                # Pin all observations for this session to ONE trace via trace_context.
+                _obs_kwargs: Dict[str, Any] = dict(
+                    name=self._name,
+                    as_type=v3_as_type,
+                    input=self._metadata,
+                    metadata=self._metadata,
+                )
+                if self._session_id and LangfuseTraceContext:
+                    _raw_sid = self._session_id.replace("-", "").lower()
+                    if len(_raw_sid) == 32 and all(c in "0123456789abcdef" for c in _raw_sid):
+                        _obs_kwargs["trace_context"] = LangfuseTraceContext(trace_id=_raw_sid)
+                        logger.info("[trace:%s] pinned to trace_id=%s", self._name, _raw_sid)
+                self._context_manager = self._tracer.client.start_as_current_observation(**_obs_kwargs)
                 self._observation = self._context_manager.__enter__()
                 logger.info("[trace:%s] observation context entered", self._name)
 
-                # Always stamp trace-level identity + name after entering observation
-                try:
-                    _trace_update: Dict[str, Any] = {}
-                    if self._user_id:
-                        _trace_update["user_id"] = self._user_id
-                    if self._session_id:
-                        _trace_update["session_id"] = self._session_id
-                    if self._tags:
-                        _trace_update["tags"] = self._tags
-                    if _trace_update:
-                        self._tracer.client.update_current_trace(**_trace_update)
-                        logger.info("[trace:%s] trace identity set via update_current_trace()", self._name)
-                except Exception as attr_err:
-                    logger.warning("Failed to update_current_trace identity: %s", attr_err)
 
             # --- Langfuse v2 SDK (Legacy) ---
             elif hasattr(self._tracer.client, "trace"):
