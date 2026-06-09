@@ -53,5 +53,6 @@ psycopg2-binary
 # Observability
 # =========================
 langfuse==4.6.1
+redis==5.2.1
 python-dotenv
 gunicorn

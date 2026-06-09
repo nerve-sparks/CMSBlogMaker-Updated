@@ -36,6 +36,9 @@ class Settings:
     GCS_PUBLIC_BASE: str = os.getenv("GCS_PUBLIC_BASE", "https://storage.googleapis.com")
     GOOGLE_APPLICATION_CREDENTIALS: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")  
 
+    # Redis (shared session store for multi-worker deployments)
+    REDIS_URL: str = os.getenv("REDIS_URL", "")
+
     # OpenAI fallback configuration
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_TEXT_MODEL: str = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o")
