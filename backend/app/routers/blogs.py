@@ -349,3 +349,48 @@ async def list_public_blogs(
         })
 
     return {"items": items, "page": page, "limit": limit, "total": total}
+
+
+@router.get("/public/blogs/{blog_id}", response_model=dict)
+async def get_public_blog(
+    blog_id: str,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    if not authorization or not authorization.startswith("Bearer sk_live_"):
+        raise HTTPException(status_code=401, detail="Missing or invalid API Key. Format: 'Bearer sk_live_...'")
+
+    api_key = authorization.replace("Bearer ", "").strip()
+    db_key = db.query(TenantAPIKey).filter(TenantAPIKey.api_key == api_key).first()
+    if not db_key:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
+
+    b_id = _parse_id(blog_id)
+    b = db.query(BlogPost).filter(
+        BlogPost.id == b_id,
+        BlogPost.tenant_id == db_key.tenant_id,
+        BlogPost.status == "published"
+    ).first()
+
+    if not b:
+        raise HTTPException(status_code=404, detail="Blog not found")
+
+    content = b.content_blocks or {}
+    meta = content.get("meta", {})
+    render = content.get("final_blog", {}).get("render", {})
+
+    cover_url = b.cover_image_url or meta.get("cover_image_url") or render.get("cover_image_url") or ""
+    if not cover_url:
+        match = re.search(r"!\[.*?\]\((.*?)\)", str(content))
+        if match:
+            cover_url = match.group(1).split(" ")[0].strip()
+
+    return {
+        "id": str(b.id),
+        "title": render.get("title", "") or meta.get("title", ""),
+        "cover_image_url": cover_url,
+        "author": b.author_name,
+        "category": meta.get("focus_or_niche", "Technology"),
+        "published_at": content.get("admin_review", {}).get("reviewed_at"),
+        "content": content.get("final_blog", {}),
+    }
