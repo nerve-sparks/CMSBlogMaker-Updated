@@ -89,7 +89,6 @@ async def gen_topic_ideas(payload: dict) -> List[str]:
     Focus/Niche: {payload['focus_or_niche']}
     Targeted keyword: {payload.get('targeted_keyword','')}
     Targeted audience: {payload.get('targeted_audience','')}
-    Reference links: {payload.get('reference_links','')}
     Generate exactly {AI_OPTIONS_COUNT} blog topic ideas. Each must be a single clear sentence.
     Return a JSON object: {{"options": [...]}} with exactly {AI_OPTIONS_COUNT} strings.
     """).lstrip("\n")
@@ -176,16 +175,21 @@ async def gen_image_prompts(payload: dict) -> List[str]:
 
 @observe(name="cms_blog_maker", as_type="generation")
 async def gen_final_blog_markdown(payload: dict) -> str:
-    refs = payload.get("reference_links", "")
     sys_prompt = "You are a senior blog writer. Return only the Markdown text, no commentary."
     set_current_system_prompt(sys_prompt)
+
+    reference_content = payload.get("reference_content", "").strip()
+    reference_block = (
+        f"\nReference material to draw from (quote, paraphrase, use as source):\n{reference_content}\n"
+        if reference_content else ""
+    )
 
     user_prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
-    Reference links: {refs}
+    {reference_block}
     Selected idea: {payload['selected_idea']}
     Title: {payload['title']}
     Intro (markdown): {payload['intro_md']}
@@ -198,7 +202,7 @@ async def gen_final_blog_markdown(payload: dict) -> str:
     - If cover_image_url is not empty, include: ![Cover](cover_image_url)
     - Use '##' headings based on the outline
     - Include a '## Conclusion' section
-    - If reference links exist, include '## References' with bullet links.
+    - If reference material was provided, incorporate facts and insights from it naturally.
     Return ONLY the Markdown text.
     """).lstrip("\n")
 

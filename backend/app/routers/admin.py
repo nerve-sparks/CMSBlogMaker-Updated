@@ -63,15 +63,16 @@ async def list_pending_blogs(
         meta = blocks.get("meta", {}) if isinstance(blocks.get("meta"), dict) else {}
         
         items.append({
-            "id": str(b.id), 
+            "id": str(b.id),
             "title": b.title or meta.get("title", ""),
             "language": meta.get("language", "English"),
             "tone": meta.get("tone", ""),
             "created_by": b.author_name or "Admin",
             "created_at": b.created_at,
             "status": b.status or "pending",
+            "scheduled_at": meta.get("scheduled_at") or None,
         })
-        
+
     return {"items": items, "page": page, "limit": limit, "total": total}
 
 @router.get("/blogs/published", response_model=dict)

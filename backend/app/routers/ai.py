@@ -356,12 +356,19 @@ async def youtube_to_blog(payload: YoutubeBlogIn, user: dict = Depends(get_curre
 @observe(name="api_blog_generate", as_type="pipeline")
 async def blog_generate(payload: GenerateBlogIn):
     try:
+        from app.services.reference_service import fetch_reference_content
+
         payload_dict = payload.model_dump()
         set_current_input_data(payload_dict)
+
         if payload.youtube_url and not payload.youtube_transcript:
             transcript = _extract_youtube_transcript(payload.youtube_url)
             if transcript:
                 payload_dict["youtube_transcript"] = transcript
+
+        # Fetch reference URL content before calling LLM
+        if payload.reference_links and payload.reference_links.strip():
+            payload_dict["reference_content"] = fetch_reference_content(payload.reference_links)
 
         raw_text = await _svc(payload_dict.get("model")).gen_final_blog_markdown(payload_dict)
         clean_markdown = raw_text.strip()

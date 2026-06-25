@@ -3,12 +3,12 @@
 # =========================
 fastapi
 uvicorn
+gunicorn
 
 # =========================
 # Validation / Settings
 # =========================
 pydantic
-pydantic-settings
 email-validator
 python-dotenv
 
@@ -16,7 +16,6 @@ python-dotenv
 # Auth / Security
 # =========================
 python-jose
-passlib
 argon2-cffi
 
 # =========================
@@ -25,6 +24,8 @@ argon2-cffi
 python-multipart
 markdown
 pillow
+beautifulsoup4
+
 # =========================
 # AI SDKs
 # =========================
@@ -36,22 +37,16 @@ openai
 # Google Cloud
 # =========================
 google-cloud-storage
-google-cloud-firestore
-firebase-admin
 
 # =========================
-# Networking
+# Networking / DB
 # =========================
-httpx
-
+requests
 sqlalchemy
 psycopg2-binary
-requests
 
 # =========================
 # Observability
 # =========================
 langfuse==4.6.1
 redis==5.2.1
-python-dotenv
-gunicorn

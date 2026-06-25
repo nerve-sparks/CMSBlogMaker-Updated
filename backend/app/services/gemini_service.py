@@ -100,7 +100,6 @@ async def gen_topic_ideas(payload: dict) -> List[str]:
     Focus/Niche: {payload['focus_or_niche']}
     Targeted keyword: {payload.get('targeted_keyword','')}
     Targeted audience: {payload.get('targeted_audience','')}
-    Reference links: {payload.get('reference_links','')}
 
     Generate exactly {AI_OPTIONS_COUNT} blog topic ideas.
     Each idea must be a single sentence, clear and specific.
@@ -239,29 +238,21 @@ async def gen_image_prompts(payload: dict) -> List[str]:
 # Final blog generation returns ONE markdown (not 5)
 @observe(name="cms_blog_maker", as_type="generation")
 async def gen_final_blog_markdown(payload: dict) -> str:
-    refs = payload.get("reference_links", "")
-    cover = payload.get("cover_image_url", "")
-    title = payload["title"]
-
-    cover_rule = (
-        f'- Second element must be {{"type": "image", "url": "{cover}", "alt": "Cover"}}'
-        if cover else ""
-    )
-    refs_rule = (
-        '- End with a {"type": "h2", "content": "References"} block followed by a {"type": "ul", "items": [...]} block with the reference links'
-        if refs else ""
-    )
-
     system_prompt_text = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
     set_current_system_prompt(system_prompt_text)
+
+    reference_content = payload.get("reference_content", "").strip()
+    reference_block = (
+        f"\nReference material to draw from (quote, paraphrase, use as source):\n{reference_content}\n"
+        if reference_content else ""
+    )
 
     prompt = dedent(f"""
     {system_prompt_text}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
-    Reference links: {refs}
-
+    {reference_block}
     Selected idea: {payload['selected_idea']}
     Title: {payload['title']}
     Intro (markdown): {payload['intro_md']}
@@ -274,7 +265,7 @@ async def gen_final_blog_markdown(payload: dict) -> str:
         - If cover_image_url is not empty, include: ![Cover](cover_image_url)
         - Use '##' headings based on the outline
         - Include a '## Conclusion' section
-        - If reference links exist, include '## References' with bullet links.
+        - If reference material was provided, incorporate facts and insights from it naturally.
         Return ONLY the Markdown text.
         """).lstrip("\n")
 
