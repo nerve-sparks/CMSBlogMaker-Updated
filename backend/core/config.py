@@ -44,4 +44,8 @@ class Settings:
     OPENAI_TEXT_MODEL: str = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o")
     OPENAI_IMAGE_MODEL: str = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1")
 
+    # YouTube transcript — Supadata API (supadata.ai)
+    # Free: 100/day — upgrade plan at supadata.ai when needed
+    SUPADATA_API_KEY: str = os.getenv("SUPADATA_API_KEY", "")
+
 settings = Settings()

@@ -3,9 +3,8 @@ import logging
 import re
 import sys
 import os
-from datetime import datetime, timezone
+import requests as _requests
 from urllib.parse import urlparse, parse_qs
-from youtube_transcript_api import YouTubeTranscriptApi
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.models.schemas import (
@@ -252,33 +251,76 @@ async def image_generate(payload: ImageGenerateIn, user: dict = Depends(get_curr
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# Simple in-process transcript cache — avoids double Supadata calls within same session
+# { video_id: (transcript_str, timestamp) }
+import time as _time
+_transcript_cache: dict = {}
+_TRANSCRIPT_CACHE_TTL = 3600  # 1 hour
+
+
+def _get_video_id(url: str) -> str | None:
+    if not url:
+        return None
+    if "youtu.be" in url:
+        vid = url.split("/")[-1].split("?")[0]
+        return vid or None
+    if "youtube.com" in url:
+        qs = parse_qs(urlparse(url).query)
+        return qs.get("v", [None])[0]
+    return None
+
+
 def _extract_youtube_transcript(url: str) -> str:
+    """Fetch transcript via Supadata API with in-memory cache to avoid duplicate calls."""
+    from core.config import settings
+
     if not url:
         return ""
-    video_id = None
-    if "youtu.be" in url:
-        video_id = url.split("/")[-1].split("?")[0]
-    elif "youtube.com" in url:
-        parsed_url = urlparse(url)
-        query_params = parse_qs(parsed_url.query)
-        video_id = query_params.get("v", [None])[0]
-    if not video_id:
-        return ""
+
+    if not settings.SUPADATA_API_KEY:
+        raise RuntimeError("SUPADATA_API_KEY is not configured. Sign up at supadata.ai to get a key.")
+
+    # Check cache first
+    video_id = _get_video_id(url) or url
+    cached = _transcript_cache.get(video_id)
+    if cached:
+        transcript, fetched_at = cached
+        if _time.time() - fetched_at < _TRANSCRIPT_CACHE_TTL:
+            logger.warning(f"[YOUTUBE] Transcript served from cache for {video_id} ({len(transcript)} chars).")
+            return transcript
+
     try:
-        api = YouTubeTranscriptApi()
-        transcript_list = api.list(video_id)
-        first_available = next(iter(transcript_list))
-        transcript_data = first_available.fetch()
-        full_text = []
-        for item in transcript_data:
-            text = getattr(item, "text", "")
-            if not text and isinstance(item, dict):
-                text = item.get("text", "")
-            if text:
-                full_text.append(text.replace('\n', ' '))
-        return " ".join(full_text)
+        logger.warning(f"[YOUTUBE] Fetching transcript via Supadata for: {url}")
+        resp = _requests.get(
+            "https://api.supadata.ai/v1/youtube/transcript",
+            params={"url": url, "text": True},
+            headers={"x-api-key": settings.SUPADATA_API_KEY},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        content = data.get("content", "")
+        if not content:
+            raise RuntimeError("Supadata returned empty transcript.")
+
+        transcript = content if isinstance(content, str) else " ".join(
+            chunk.get("text", "") for chunk in content if isinstance(chunk, dict)
+        )
+        transcript = transcript.strip()
+
+        # Store in cache
+        _transcript_cache[video_id] = (transcript, _time.time())
+
+        logger.warning(f"[YOUTUBE] Transcript fetched — {len(transcript)} chars.")
+        return transcript
+
+    except _requests.HTTPError as e:
+        status_code = e.response.status_code if e.response is not None else "unknown"
+        logger.error(f"[YOUTUBE] Supadata HTTP error {status_code}: {e}")
+        raise RuntimeError(f"Supadata API error ({status_code}). Check your API key or quota at supadata.ai.")
     except Exception as e:
-        logger.error(f"Failed to fetch YouTube transcript: {e}", exc_info=True)
+        logger.error(f"[YOUTUBE] Transcript extraction failed: {e}", exc_info=True)
         return ""
 
 @router.post("/youtube-to-blog")
@@ -316,7 +358,7 @@ async def blog_generate(payload: GenerateBlogIn):
     try:
         payload_dict = payload.model_dump()
         set_current_input_data(payload_dict)
-        if payload.youtube_url:
+        if payload.youtube_url and not payload.youtube_transcript:
             transcript = _extract_youtube_transcript(payload.youtube_url)
             if transcript:
                 payload_dict["youtube_transcript"] = transcript
