@@ -352,7 +352,7 @@ async def gen_youtube_blog_json(payload: dict) -> dict:
     }}
 
     YOUTUBE TRANSCRIPT:
-    {transcript[:25000]}  
+    {transcript[:100000]}
     """).strip()
 
     data = _call_json_model(prompt)
