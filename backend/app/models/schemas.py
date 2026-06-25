@@ -153,6 +153,7 @@ class TopicIdeasIn(BaseModel):
     creativity: str
     count: int = Field(default=AI_OPTIONS_COUNT, ge=1, le=AI_OPTIONS_MAX)
     session_id: Optional[str] = None  # shared across full blog workflow for grouping in Langfuse
+    model: Optional[str] = None  # LLM model override (e.g. "gpt-4o", "gemini-2.5-flash")
 
 
 class TitlesIn(BaseModel):
@@ -165,10 +166,11 @@ class TitlesIn(BaseModel):
     reference_links: str = ""
     selected_idea: str
     session_id: Optional[str] = None
+    model: Optional[str] = None
 
 
 class ImagePromptsIn(BaseModel):
-    
+
     tone: str
     creativity: str
     focus_or_niche: str
@@ -178,6 +180,7 @@ class ImagePromptsIn(BaseModel):
     selected_idea: str
     title: str
     session_id: Optional[str] = None
+    model: Optional[str] = None
 
 
 class IntrosIn(BaseModel):
@@ -191,6 +194,7 @@ class IntrosIn(BaseModel):
     selected_idea: str
     title: str
     session_id: Optional[str] = None
+    model: Optional[str] = None
 
 
 class OutlinesIn(BaseModel):
@@ -205,6 +209,7 @@ class OutlinesIn(BaseModel):
     title: str
     intro_md: str
     session_id: Optional[str] = None
+    model: Optional[str] = None
 
 
 class ImageGenerateIn(BaseModel):
@@ -223,6 +228,7 @@ class ImageGenerateIn(BaseModel):
     source: Literal["blog", "nano"] = "nano"
     save_to_gallery: bool = True
     session_id: Optional[str] = None
+    image_model: Literal["gemini", "openai"] = "gemini"  # which image provider to use
 
 
 class ImageSaveIn(BaseModel):
@@ -247,9 +253,9 @@ class GenerateBlogIn(BaseModel):
     targeted_keyword: str = ""
     targeted_audience: str = ""
     reference_links: str = ""
-    
-    youtube_url: str = "" 
-    youtube_transcript: str = "" 
+
+    youtube_url: str = ""
+    youtube_transcript: str = ""
 
     selected_idea: str
     title: str
@@ -259,6 +265,7 @@ class GenerateBlogIn(BaseModel):
     cover_image_url: str = ""
     primary_color: str = "#4443E4"
     session_id: Optional[str] = None
+    model: Optional[str] = None  # LLM model override
 
 
 class OptionsOut(BaseModel):

@@ -12,10 +12,9 @@ from app.models.schemas import (
     TopicIdeasIn, TitlesIn, ImagePromptsIn, IntrosIn, OutlinesIn, 
     ImageGenerateIn, ImageOut, GenerateBlogIn, OptionsOut, YoutubeBlogIn
 )
-from app.services.gemini_service import (
-    gen_topic_ideas, gen_titles, gen_intros, gen_outlines, 
-    gen_image_prompts, gen_final_blog_markdown, gen_youtube_blog_json
-)
+import app.services.gemini_service as _gemini_svc
+import app.services.openai_service as _openai_svc
+from app.services.gemini_service import gen_youtube_blog_json
 from app.services.image_service import generate_cover_image
 from core.deps import get_current_user
 
@@ -28,6 +27,112 @@ from langfuse_observer import observe
 from langfuse_tracer import set_current_input_data
 
 logger = logging.getLogger(__name__)
+
+AVAILABLE_TEXT_MODELS = [
+    # ── Google Gemini ──────────────────────────────────────────────────────────
+    {
+        "id": "gemini-2.5-pro",
+        "name": "Gemini 2.5 Pro",
+        "provider": "google",
+        "tier": "pro",
+        "speed": "slow",
+        "badge": "Best Quality",
+        "description": "Highest quality with deep thinking. Best for long-form, research-heavy blogs.",
+    },
+    {
+        "id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "provider": "google",
+        "tier": "standard",
+        "speed": "fast",
+        "badge": "Recommended",
+        "description": "Fast with great quality. Best balance for most blogs.",
+    },
+    {
+        "id": "gemini-2.0-flash",
+        "name": "Gemini 2.0 Flash",
+        "provider": "google",
+        "tier": "standard",
+        "speed": "fast",
+        "badge": None,
+        "description": "Previous generation. Reliable and fast.",
+    },
+    # ── OpenAI ─────────────────────────────────────────────────────────────────
+    {
+        "id": "o3",
+        "name": "OpenAI o3",
+        "provider": "openai",
+        "tier": "pro",
+        "speed": "slow",
+        "badge": "Best Reasoning",
+        "description": "Maximum reasoning power. Best for technical, analytical blogs.",
+    },
+    {
+        "id": "o4-mini",
+        "name": "OpenAI o4 Mini",
+        "provider": "openai",
+        "tier": "standard",
+        "speed": "medium",
+        "badge": "Fast Reasoning",
+        "description": "Reasoning model at faster speed. Great for structured content.",
+    },
+    {
+        "id": "gpt-4.1",
+        "name": "GPT-4.1",
+        "provider": "openai",
+        "tier": "pro",
+        "speed": "medium",
+        "badge": "Latest GPT",
+        "description": "OpenAI's latest flagship. Excellent writing quality.",
+    },
+    {
+        "id": "gpt-4o",
+        "name": "GPT-4o",
+        "provider": "openai",
+        "tier": "standard",
+        "speed": "fast",
+        "badge": None,
+        "description": "Balanced quality and speed.",
+    },
+    {
+        "id": "gpt-4o-mini",
+        "name": "GPT-4o Mini",
+        "provider": "openai",
+        "tier": "budget",
+        "speed": "fast",
+        "badge": "Fastest",
+        "description": "Lightweight and fast. Good for quick drafts.",
+    },
+]
+
+AVAILABLE_IMAGE_MODELS = [
+    {
+        "id": "gemini",
+        "name": "Imagen 3",
+        "provider": "google",
+        "badge": "Recommended",
+        "description": "Google's Imagen 3. Vivid, high-detail illustrations.",
+    },
+    {
+        "id": "openai",
+        "name": "GPT Image 1",
+        "provider": "openai",
+        "badge": "Latest",
+        "description": "OpenAI's latest image model. Realistic and versatile.",
+    },
+]
+
+# OpenAI model prefixes — used for service routing
+_OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4")
+
+def _svc(model: str | None):
+    """Pick gemini or openai service based on model name."""
+    if model and any(model.startswith(p) for p in _OPENAI_PREFIXES):
+        svc = _openai_svc
+    else:
+        svc = _gemini_svc
+    logger.warning(f"[MODEL ROUTING] requested='{model or 'default'}' → service={svc.__name__}")
+    return svc
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -65,13 +170,19 @@ def _raise_ai_error(err: Exception):
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
 
 
+@router.get("/models", response_model=dict)
+async def get_models():
+    """Return available LLM and image models for the frontend to display."""
+    return {"text_models": AVAILABLE_TEXT_MODELS, "image_models": AVAILABLE_IMAGE_MODELS}
+
+
 @router.post("/ideas", response_model=OptionsOut)
 @observe(name="api_topic_ideas", as_type="pipeline")
 async def topic_ideas(payload: TopicIdeasIn):
     try:
         data = payload.model_dump()
         set_current_input_data(data)
-        options = await gen_topic_ideas(data)
+        options = await _svc(data.get("model")).gen_topic_ideas(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
@@ -83,7 +194,7 @@ async def titles(payload: TitlesIn):
     try:
         data = payload.model_dump()
         set_current_input_data(data)
-        options = await gen_titles(data)
+        options = await _svc(data.get("model")).gen_titles(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
@@ -95,7 +206,7 @@ async def intros(payload: IntrosIn):
     try:
         data = payload.model_dump()
         set_current_input_data(data)
-        options = await gen_intros(data)
+        options = await _svc(data.get("model")).gen_intros(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
@@ -107,7 +218,7 @@ async def outlines(payload: OutlinesIn):
     try:
         data = payload.model_dump()
         set_current_input_data(data)
-        options = await gen_outlines(data)
+        options = await _svc(data.get("model")).gen_outlines(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
@@ -119,7 +230,7 @@ async def image_prompts(payload: ImagePromptsIn):
     try:
         data = payload.model_dump()
         set_current_input_data(data)
-        options = await gen_image_prompts(data)
+        options = await _svc(data.get("model")).gen_image_prompts(data)
         return {"options": options}
     except Exception as e:
         _raise_ai_error(e)
@@ -210,7 +321,7 @@ async def blog_generate(payload: GenerateBlogIn):
             if transcript:
                 payload_dict["youtube_transcript"] = transcript
 
-        raw_text = await gen_final_blog_markdown(payload_dict)
+        raw_text = await _svc(payload_dict.get("model")).gen_final_blog_markdown(payload_dict)
         clean_markdown = raw_text.strip()
 
         try:

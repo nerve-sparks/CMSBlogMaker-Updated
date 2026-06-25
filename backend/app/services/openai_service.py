@@ -42,6 +42,33 @@ def _sys(tone: str, creativity: str) -> str:
         "Return ONLY valid JSON according to the schema.\n"
     )
 
+# o-series models (o1, o3, o4-*) don't support temperature or system messages
+_REASONING_PREFIXES = ("o1", "o3", "o4")
+
+def _is_reasoning_model(model: str) -> bool:
+    return any(model.startswith(p) for p in _REASONING_PREFIXES)
+
+def _chat_json(client, model: str, system: str, user: str) -> str:
+    """Call chat completions and return raw content string. Handles o-series quirks."""
+    if _is_reasoning_model(model):
+        # o-series: no temperature, no system role, no response_format
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": f"{system}\n\n{user}"}],
+        )
+    else:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.7,
+        )
+    _capture_openai_usage(response)
+    return response.choices[0].message.content or ""
+
 def _capture_openai_usage(response):
     """Forward OpenAI usage metrics to Langfuse (best effort)."""
     try:
@@ -56,104 +83,63 @@ def _capture_openai_usage(response):
 
 @observe(name="gen_topic_ideas_openai", as_type="generation")
 async def gen_topic_ideas(payload: dict) -> List[str]:
-    prompt = dedent(f"""
+    sys_prompt = "You are a helpful assistant that returns only valid JSON."
+    user_prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
     Focus/Niche: {payload['focus_or_niche']}
     Targeted keyword: {payload.get('targeted_keyword','')}
     Targeted audience: {payload.get('targeted_audience','')}
     Reference links: {payload.get('reference_links','')}
-
-    Generate exactly {AI_OPTIONS_COUNT} blog topic ideas.
-    Each idea must be a single sentence, clear and specific.
-    Return a JSON object with an "options" array containing exactly {AI_OPTIONS_COUNT} strings.
+    Generate exactly {AI_OPTIONS_COUNT} blog topic ideas. Each must be a single clear sentence.
+    Return a JSON object: {{"options": [...]}} with exactly {AI_OPTIONS_COUNT} strings.
     """).lstrip("\n")
 
-    client = _get_client()
-    response = client.chat.completions.create(
-        model=settings.OPENAI_TEXT_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that returns only valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.7,
-    )
+    model = payload.get("model") or settings.OPENAI_TEXT_MODEL
+    raw = _chat_json(_get_client(), model, sys_prompt, user_prompt)
+    return json.loads(raw).get("options", [])
 
-    _capture_openai_usage(response)
-    
-    result = json.loads(response.choices[0].message.content)
-    return result.get("options", [])
 
 @observe(name="gen_titles_openai", as_type="generation")
 async def gen_titles(payload: dict) -> List[str]:
-    prompt = dedent(f"""
+    sys_prompt = "You are a helpful assistant that returns only valid JSON."
+    user_prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
     Selected idea: {payload['selected_idea']}
-
-    Generate exactly {AI_OPTIONS_COUNT} SEO-friendly blog titles.
-    No quotes, no emojis.
-    Return a JSON object with an "options" array containing exactly {AI_OPTIONS_COUNT} strings.
+    Generate exactly {AI_OPTIONS_COUNT} SEO-friendly blog titles. No quotes, no emojis.
+    Return a JSON object: {{"options": [...]}} with exactly {AI_OPTIONS_COUNT} strings.
     """).lstrip("\n")
 
-    client = _get_client()
-    response = client.chat.completions.create(
-        model=settings.OPENAI_TEXT_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that returns only valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.7,
-    )
+    model = payload.get("model") or settings.OPENAI_TEXT_MODEL
+    raw = _chat_json(_get_client(), model, sys_prompt, user_prompt)
+    return json.loads(raw).get("options", [])
 
-    _capture_openai_usage(response)
-    
-    result = json.loads(response.choices[0].message.content)
-    return result.get("options", [])
 
 @observe(name="gen_intros_openai", as_type="generation")
 async def gen_intros(payload: dict) -> List[str]:
-    prompt = dedent(f"""
+    sys_prompt = "You are a helpful assistant that returns only valid JSON."
+    user_prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
     Selected idea: {payload['selected_idea']}
     Title: {payload['title']}
-
-    Generate exactly {AI_OPTIONS_COUNT} intro paragraphs in Markdown.
-    Each intro: 80-140 words.
-    Return a JSON object with an "options" array containing exactly {AI_OPTIONS_COUNT} strings.
+    Generate exactly {AI_OPTIONS_COUNT} intro paragraphs in Markdown, each 80-140 words.
+    Return a JSON object: {{"options": [...]}} with exactly {AI_OPTIONS_COUNT} strings.
     """).lstrip("\n")
 
-    client = _get_client()
-    response = client.chat.completions.create(
-        model=settings.OPENAI_TEXT_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that returns only valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.7,
-    )
+    model = payload.get("model") or settings.OPENAI_TEXT_MODEL
+    raw = _chat_json(_get_client(), model, sys_prompt, user_prompt)
+    return json.loads(raw).get("options", [])
 
-    _capture_openai_usage(response)
-    
-    result = json.loads(response.choices[0].message.content)
-    return result.get("options", [])
-
-class _OutlineVariant(BaseModel):
-    outline: List[str] = Field(min_length=6, max_length=12)
-
-class _OutlineOptions(BaseModel):
-    options: List[_OutlineVariant] = Field(min_length=AI_OPTIONS_COUNT, max_length=AI_OPTIONS_COUNT)
 
 @observe(name="gen_outlines_openai", as_type="generation")
 async def gen_outlines(payload: dict):
-    prompt = dedent(f"""
+    sys_prompt = "You are a helpful assistant that returns only valid JSON."
+    user_prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
@@ -161,75 +147,45 @@ async def gen_outlines(payload: dict):
     Selected idea: {payload['selected_idea']}
     Title: {payload['title']}
     Intro: {payload['intro_md']}
-
-    Generate exactly {AI_OPTIONS_COUNT} outline variants.
-    Each outline should be 6-10 headings.
-    Headings must be short and not numbered.
-    Return a JSON object with an "options" array containing exactly {AI_OPTIONS_COUNT} objects.
-    Each object should have an "outline" array with 6-12 string headings.
+    Generate exactly {AI_OPTIONS_COUNT} outline variants, each with 6-10 short headings (not numbered).
+    Return a JSON object: {{"options": [{{"outline": [...]}}]}} with exactly {AI_OPTIONS_COUNT} objects.
     """).lstrip("\n")
 
-    client = _get_client()
-    response = client.chat.completions.create(
-        model=settings.OPENAI_TEXT_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that returns only valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.7,
-    )
+    model = payload.get("model") or settings.OPENAI_TEXT_MODEL
+    raw = _chat_json(_get_client(), model, sys_prompt, user_prompt)
+    return json.loads(raw).get("options", [])
 
-    _capture_openai_usage(response)
-    
-    result = json.loads(response.choices[0].message.content)
-    return result.get("options", [])
 
 @observe(name="gen_image_prompts_openai", as_type="generation")
 async def gen_image_prompts(payload: dict) -> List[str]:
-    prompt = dedent(f"""
+    sys_prompt = "You are a helpful assistant that returns only valid JSON."
+    user_prompt = dedent(f"""
     {_sys(payload['tone'], payload['creativity'])}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Selected idea: {payload['selected_idea']}
     Title: {payload['title']}
-
-    Generate exactly {AI_OPTIONS_COUNT} blog cover image prompts.
-    Avoid text/logos/watermarks.
-    Return a JSON object with an "options" array containing exactly {AI_OPTIONS_COUNT} strings.
+    Generate exactly {AI_OPTIONS_COUNT} blog cover image prompts. Avoid text, logos, watermarks.
+    Return a JSON object: {{"options": [...]}} with exactly {AI_OPTIONS_COUNT} strings.
     """).lstrip("\n")
 
-    client = _get_client()
-    response = client.chat.completions.create(
-        model=settings.OPENAI_TEXT_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that returns only valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.7,
-    )
+    model = payload.get("model") or settings.OPENAI_TEXT_MODEL
+    raw = _chat_json(_get_client(), model, sys_prompt, user_prompt)
+    return json.loads(raw).get("options", [])
 
-    _capture_openai_usage(response)
-    
-    result = json.loads(response.choices[0].message.content)
-    return result.get("options", [])
 
-# Final blog generation returns ONE markdown (not 5)
 @observe(name="cms_blog_maker", as_type="generation")
 async def gen_final_blog_markdown(payload: dict) -> str:
     refs = payload.get("reference_links", "")
+    sys_prompt = "You are a senior blog writer. Return only the Markdown text, no commentary."
+    set_current_system_prompt(sys_prompt)
 
-    system_prompt_text = _sys(payload['tone'], payload['creativity'])
-    set_current_system_prompt(system_prompt_text)
-
-    prompt = dedent(f"""
-    {system_prompt_text}
+    user_prompt = dedent(f"""
+    {_sys(payload['tone'], payload['creativity'])}
     Focus/Niche: {payload['focus_or_niche']}
     Keyword: {payload.get('targeted_keyword','')}
     Audience: {payload.get('targeted_audience','')}
     Reference links: {refs}
-
     Selected idea: {payload['selected_idea']}
     Title: {payload['title']}
     Intro (markdown): {payload['intro_md']}
@@ -246,16 +202,22 @@ async def gen_final_blog_markdown(payload: dict) -> str:
     Return ONLY the Markdown text.
     """).lstrip("\n")
 
+    model = payload.get("model") or settings.OPENAI_TEXT_MODEL
     client = _get_client()
-    response = client.chat.completions.create(
-        model=settings.OPENAI_TEXT_MODEL,
-        messages=[
-            {"role": "system", "content": "You are a senior blog writer. Return only the Markdown text, no additional commentary."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-    )
 
+    if _is_reasoning_model(model):
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": f"{sys_prompt}\n\n{user_prompt}"}],
+        )
+    else:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.7,
+        )
     _capture_openai_usage(response)
-    
     return (response.choices[0].message.content or "").strip()

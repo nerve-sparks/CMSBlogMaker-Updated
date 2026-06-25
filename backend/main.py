@@ -197,7 +197,7 @@ api_app.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 # Create root app AND ATTACH THE LIFESPAN HERE
 app = FastAPI(lifespan=lifespan)
-app.mount("/", api_app)
+app.mount("/cms-backend", api_app)
 
 # Middleware must be on the ROOT app so ContextVar values set here propagate
 # correctly to route handlers. Adding it to the mounted sub-app (api_app)

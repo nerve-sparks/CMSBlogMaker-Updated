@@ -20,11 +20,11 @@ from langfuse_observer import observe
 from langfuse_tracer import set_current_usage_metrics, set_current_system_prompt
 
 
-def _get_model() -> "genai.GenerativeModel":
+def _get_model(model_override: str = None) -> "genai.GenerativeModel":
     if not settings.GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not set.")
     genai.configure(api_key=settings.GEMINI_API_KEY)
-    model_name = settings.GEMINI_TEXT_MODEL or "gemini-1.5-flash"
+    model_name = model_override or settings.GEMINI_TEXT_MODEL or "gemini-2.5-flash"
     return genai.GenerativeModel(model_name)
 
 # ---------- schemas for structured outputs ----------
@@ -48,9 +48,9 @@ def _sys(tone: str, creativity: str, language: str = "English") -> str:
     )
 
 
-def _call_json_model(prompt: str, system_prompt: Optional[str] = None) -> dict:
+def _call_json_model(prompt: str, system_prompt: Optional[str] = None, model_override: str = None) -> dict:
     """Call Gemini and parse JSON response from text."""
-    model = _get_model()
+    model = _get_model(model_override)
 
     # Capture system prompt in Langfuse metadata (best effort)
     try:
@@ -108,7 +108,7 @@ async def gen_topic_ideas(payload: dict) -> List[str]:
     Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
     """).lstrip("\n")
 
-    data = _call_json_model(prompt, system_prompt=sys_prompt)
+    data = _call_json_model(prompt, system_prompt=sys_prompt, model_override=payload.get("model"))
     options = data.get("options") or []
     if not isinstance(options, list):
         raise ValueError("Gemini topic ideas response missing 'options' list")
@@ -131,7 +131,7 @@ async def gen_titles(payload: dict) -> List[str]:
         Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt, system_prompt=sys_prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt, model_override=payload.get("model"))
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini titles response missing 'options' list")
@@ -158,7 +158,7 @@ async def gen_intros(payload: dict) -> List[str]:
         Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt, system_prompt=sys_prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt, model_override=payload.get("model"))
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini intros response missing 'options' list")
@@ -193,7 +193,7 @@ async def gen_outlines(payload: dict):
         Return a JSON object: {{"options": [{{"outline": [..] }}, ...]}}.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt, system_prompt=sys_prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt, model_override=payload.get("model"))
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini outlines response missing 'options' list")
@@ -227,7 +227,7 @@ async def gen_image_prompts(payload: dict) -> List[str]:
         Return a JSON object: {{"options": [ ... ]}} with exactly {AI_OPTIONS_COUNT} strings.
         """).lstrip("\n")
 
-        data = _call_json_model(prompt, system_prompt=sys_prompt)
+        data = _call_json_model(prompt, system_prompt=sys_prompt, model_override=payload.get("model"))
         options = data.get("options") or []
         if not isinstance(options, list):
             raise ValueError("Gemini image prompts response missing 'options' list")
@@ -278,7 +278,7 @@ async def gen_final_blog_markdown(payload: dict) -> str:
         Return ONLY the Markdown text.
         """).lstrip("\n")
 
-    model = _get_model()
+    model = _get_model(payload.get("model"))
     resp = model.generate_content(
         prompt,
         generation_config={"temperature": 0.7},
