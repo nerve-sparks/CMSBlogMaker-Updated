@@ -80,9 +80,9 @@ class BlogMeta(BaseModel):
     focus_or_niche: str = ""
     targeted_keyword: str = ""
     targeted_audience: str = ""
-    reference_links: str = "" 
-    
-    youtube_url: str = "" 
+    reference_links: str = ""
+
+    youtube_url: str = ""
 
     selected_idea: str = ""
     title: str = ""
@@ -91,6 +91,7 @@ class BlogMeta(BaseModel):
 
     image_prompt: str = ""
     cover_image_url: str = ""
+    category_name: str = ""
 
 
 class AdminReview(BaseModel):

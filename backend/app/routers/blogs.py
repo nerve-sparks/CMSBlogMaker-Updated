@@ -43,6 +43,7 @@ def _map_blog_for_list(b: BlogPost) -> dict:
         "reviewed_at": admin_review.get("reviewed_at"),
         "reviewed_by": admin_review.get("reviewed_by_name"),
         "status": b.status,
+        "category_name": b.category_name or "",
     }
 
 def _map_blog_detail(b: BlogPost) -> dict:
@@ -64,9 +65,10 @@ def _map_blog_detail(b: BlogPost) -> dict:
 async def save_blog(payload: BlogCreateIn, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     meta_dict = payload.meta.model_dump()
     final_blog_dict = payload.final_blog.model_dump()
-    
+
     title = meta_dict.get("title") or final_blog_dict.get("render", {}).get("title", "Untitled")
-    
+    category_name = meta_dict.get("category_name") or ""
+
     content_blocks = {
         "meta": meta_dict,
         "final_blog": final_blog_dict,
@@ -84,6 +86,7 @@ async def save_blog(payload: BlogCreateIn, user: dict = Depends(get_current_user
         author_id=user.get("id"),
         author_name=user.get("name", ""),
         title=title,
+        category_name=category_name or None,
         content_blocks=content_blocks,
         status="saved"
     )
@@ -101,17 +104,20 @@ async def list_my_blogs(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=5, le=50),
     search: str = Query("", description="Search query filter"),
+    category: str = Query("", description="Filter by category name"),
 ):
     skip = (page - 1) * limit
     query = db.query(BlogPost).filter(BlogPost.author_id == user["id"])
-    
+
     if search.strip():
-        search_term = f"%{search.strip().lower()}%"
-        query = query.filter(func.lower(BlogPost.title).ilike(search_term))
-        
+        query = query.filter(func.lower(BlogPost.title).ilike(f"%{search.strip().lower()}%"))
+
+    if category.strip():
+        query = query.filter(func.lower(BlogPost.category_name).ilike(f"%{category.strip().lower()}%"))
+
     total = query.count()
     blogs = query.order_by(desc(BlogPost.created_at)).offset(skip).limit(limit).all()
-    
+
     items = [_map_blog_for_list(b) for b in blogs]
     return {"items": items, "page": page, "limit": limit, "total": total}
 
@@ -235,10 +241,11 @@ async def update_blog_route(blog_id: str, payload: BlogCreateIn, user: dict = De
     content = b.content_blocks or {}
     content["meta"] = payload.meta.model_dump()
     content["final_blog"] = payload.final_blog.model_dump()
-    
+
     b.content_blocks = content
     b.title = content["meta"].get("title") or content["final_blog"].get("render", {}).get("title", "Untitled")
-    
+    b.category_name = content["meta"].get("category_name") or b.category_name
+
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(b, "content_blocks")
     
@@ -297,10 +304,11 @@ async def change_to_draft(blog_id: str, user: dict = Depends(get_current_user), 
 
 @router.get("/public/blogs", response_model=dict)
 async def list_public_blogs(
-    page: int = Query(1, ge=1), 
-    limit: int = Query(10, ge=1, le=50), 
-    authorization: str = Header(None), 
-    db: Session = Depends(get_db)
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    authorization: str = Header(None),
+    category: str = Query("", description="Filter by category name"),
+    db: Session = Depends(get_db),
 ):
     if not authorization or not authorization.startswith("Bearer sk_live_"):
         raise HTTPException(status_code=401, detail="Missing or invalid API Key. Format: 'Bearer sk_live_...'")
@@ -318,7 +326,10 @@ async def list_public_blogs(
         BlogPost.tenant_id == tenant_id,
         BlogPost.status == "published"
     )
-    
+
+    if category.strip():
+        query = query.filter(func.lower(BlogPost.category_name).ilike(f"%{category.strip().lower()}%"))
+
     total = query.count()
     blogs = query.order_by(desc(BlogPost.updated_at)).offset(skip).limit(limit).all()
     
@@ -344,7 +355,7 @@ async def list_public_blogs(
             "cover_image_url": cover_url,
             "intro": clean_intro,
             "author": b.author_name,
-            "category": meta.get("focus_or_niche", "Technology"),
+            "category": b.category_name or meta.get("focus_or_niche", ""),
             "published_at": content.get("admin_review", {}).get("reviewed_at"),
         })
 
@@ -390,7 +401,7 @@ async def get_public_blog(
         "title": render.get("title", "") or meta.get("title", ""),
         "cover_image_url": cover_url,
         "author": b.author_name,
-        "category": meta.get("focus_or_niche", "Technology"),
+        "category": b.category_name or meta.get("focus_or_niche", ""),
         "published_at": content.get("admin_review", {}).get("reviewed_at"),
         "content": content.get("final_blog", {}),
     }

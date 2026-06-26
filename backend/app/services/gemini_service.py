@@ -242,6 +242,11 @@ async def gen_final_blog_markdown(payload: dict) -> str:
     set_current_system_prompt(system_prompt_text)
 
     reference_content = payload.get("reference_content", "").strip()
+    if reference_content:
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            f"[REFERENCE → LLM] Injecting {len(reference_content)} chars of reference content into Gemini prompt."
+        )
     reference_block = (
         f"\nReference material to draw from (quote, paraphrase, use as source):\n{reference_content}\n"
         if reference_content else ""

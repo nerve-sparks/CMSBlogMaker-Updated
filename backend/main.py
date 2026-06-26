@@ -14,7 +14,7 @@ from core.config import settings
 from core.database import engine, SessionLocal  #  Added SessionLocal here!
 from core import models
 from core.models import BlogPost #  Added BlogPost here!
-from app.routers import auth, ai, blogs, admin, images
+from app.routers import auth, ai, blogs, admin, images, categories
 
 # Langfuse session grouping helpers
 _backend_root = os.path.dirname(os.path.abspath(__file__))
@@ -194,6 +194,7 @@ api_app.include_router(ai.router, prefix="/ai", tags=["ai"])
 api_app.include_router(blogs.router, tags=["blogs"])
 api_app.include_router(images.router, tags=["images"])
 api_app.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_app.include_router(categories.router, tags=["categories"])
 
 # Create root app AND ATTACH THE LIFESPAN HERE
 app = FastAPI(lifespan=lifespan)

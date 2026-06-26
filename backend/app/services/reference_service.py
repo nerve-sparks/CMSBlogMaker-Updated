@@ -67,16 +67,21 @@ def fetch_reference_content(urls_str: str) -> str:
     if not urls:
         return ""
 
+    logger.warning(f"[REFERENCE] Starting fetch for {len(urls)} URL(s): {urls}")
+
     sections = []
     for url in urls:
         content = _fetch_url(url)
         if content:
             sections.append(f'Source ({url}):\n"""\n{content}\n"""')
-            logger.info(f"[REFERENCE] Fetched {len(content)} chars from {url}")
+            logger.warning(f"[REFERENCE] ✓ Got {len(content)} chars from: {url}")
+            logger.warning(f"[REFERENCE] Preview: {content[:200]}...")
         else:
-            logger.warning(f"[REFERENCE] Skipped {url} — could not fetch content")
+            logger.warning(f"[REFERENCE] ✗ Could not fetch: {url}")
 
     if not sections:
+        logger.warning("[REFERENCE] No content fetched from any URL — LLM will get no reference material.")
         return ""
 
+    logger.warning(f"[REFERENCE] Done — passing {len(sections)} source(s) to LLM.")
     return "\n\n".join(sections)

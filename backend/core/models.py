@@ -27,9 +27,12 @@ class BlogPost(Base):
     cover_image_url = Column(String, nullable=True)
     youtube_url = Column(String, nullable=True)
     
+    #  Category
+    category_name = Column(String, nullable=True, index=True)
+
     #  Workflow Status
     # Users create 'pending' blogs. Admins approve them to 'published'.
-    status = Column(String, default="pending", index=True) 
+    status = Column(String, default="pending", index=True)
     
     #  Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -58,7 +61,32 @@ class ImageAsset(Base):
     #  Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-# PASTE THIS AT THE BOTTOM OF YOUR MODELS FILE
+class Category(Base):
+    """Admin-created categories per tenant."""
+    __tablename__ = "categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    created_by_id = Column(String, nullable=True)
+    created_by_name = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CategoryRequest(Base):
+    """User-submitted requests for new categories, pending admin approval."""
+    __tablename__ = "category_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String, index=True, nullable=False)
+    requested_by_id = Column(String, nullable=False)
+    requested_by_name = Column(String, nullable=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String, default="pending", index=True)  # pending / approved / rejected
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class TenantAPIKey(Base):
     """
