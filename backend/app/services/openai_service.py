@@ -24,9 +24,14 @@ _client = None
 def _get_client():
     global _client
     if _client is None:
-        if not settings.OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY is not set.")
-        _client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        if settings.USE_LITELLM:
+            if not settings.LLM_API_KEY or not settings.LLM_BASE_URL:
+                raise RuntimeError("LLM_API_KEY and LLM_BASE_URL must be set when USE_LITELLM=true.")
+            _client = OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL)
+        else:
+            if not settings.OPENAI_API_KEY:
+                raise RuntimeError("OPENAI_API_KEY is not set.")
+            _client = OpenAI(api_key=settings.OPENAI_API_KEY)
     return _client
 
 # ---------- schemas for structured outputs ----------

@@ -48,4 +48,11 @@ class Settings:
     # Free: 100/day — upgrade plan at supadata.ai when needed
     SUPADATA_API_KEY: str = os.getenv("SUPADATA_API_KEY", "")
 
+    # LiteLLM/BridgeLLM proxy toggle — routes text (and image) generation through an
+    # OpenAI-compatible proxy instead of calling Gemini/OpenAI directly. The model id
+    # the user picks (e.g. "gemini-2.5-pro") is sent to the proxy unchanged, no prefix.
+    USE_LITELLM: bool = os.getenv("USE_LITELLM", "false").lower() == "true"
+    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
+    LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "")
+
 settings = Settings()

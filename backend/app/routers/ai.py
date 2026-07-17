@@ -56,52 +56,6 @@ AVAILABLE_TEXT_MODELS = [
         "badge": None,
         "description": "Previous generation. Reliable and fast.",
     },
-    # ── OpenAI ─────────────────────────────────────────────────────────────────
-    {
-        "id": "o3",
-        "name": "OpenAI o3",
-        "provider": "openai",
-        "tier": "pro",
-        "speed": "slow",
-        "badge": "Best Reasoning",
-        "description": "Maximum reasoning power. Best for technical, analytical blogs.",
-    },
-    {
-        "id": "o4-mini",
-        "name": "OpenAI o4 Mini",
-        "provider": "openai",
-        "tier": "standard",
-        "speed": "medium",
-        "badge": "Fast Reasoning",
-        "description": "Reasoning model at faster speed. Great for structured content.",
-    },
-    {
-        "id": "gpt-4.1",
-        "name": "GPT-4.1",
-        "provider": "openai",
-        "tier": "pro",
-        "speed": "medium",
-        "badge": "Latest GPT",
-        "description": "OpenAI's latest flagship. Excellent writing quality.",
-    },
-    {
-        "id": "gpt-4o",
-        "name": "GPT-4o",
-        "provider": "openai",
-        "tier": "standard",
-        "speed": "fast",
-        "badge": None,
-        "description": "Balanced quality and speed.",
-    },
-    {
-        "id": "gpt-4o-mini",
-        "name": "GPT-4o Mini",
-        "provider": "openai",
-        "tier": "budget",
-        "speed": "fast",
-        "badge": "Fastest",
-        "description": "Lightweight and fast. Good for quick drafts.",
-    },
 ]
 
 AVAILABLE_IMAGE_MODELS = [
@@ -111,13 +65,6 @@ AVAILABLE_IMAGE_MODELS = [
         "provider": "google",
         "badge": "Recommended",
         "description": "Google's Imagen 3. Vivid, high-detail illustrations.",
-    },
-    {
-        "id": "openai",
-        "name": "GPT Image 1",
-        "provider": "openai",
-        "badge": "Latest",
-        "description": "OpenAI's latest image model. Realistic and versatile.",
     },
 ]
 

@@ -6,6 +6,7 @@ import sys
 import os
 
 import google.generativeai as genai
+from openai import OpenAI
 from pydantic import BaseModel, Field, create_model
 
 from core.config import settings
@@ -26,6 +27,30 @@ def _get_model(model_override: str = None) -> "genai.GenerativeModel":
     genai.configure(api_key=settings.GEMINI_API_KEY)
     model_name = model_override or settings.GEMINI_TEXT_MODEL or "gemini-2.5-flash"
     return genai.GenerativeModel(model_name)
+
+
+_litellm_client = None
+
+def _get_litellm_client() -> OpenAI:
+    global _litellm_client
+    if _litellm_client is None:
+        if not settings.LLM_API_KEY or not settings.LLM_BASE_URL:
+            raise RuntimeError("LLM_API_KEY and LLM_BASE_URL must be set when USE_LITELLM=true.")
+        _litellm_client = OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL)
+    return _litellm_client
+
+
+# The app's model picker ids (gemini-2.5-pro, etc.) don't exist on the LiteLLM proxy —
+# map each to the closest id actually available there (confirmed against the proxy's
+# /v1/models list). Direct-Gemini calls (USE_LITELLM=false) use the real ids, unmapped.
+_LITELLM_MODEL_MAP = {
+    "gemini-2.5-pro": "gemini-pro",
+    "gemini-2.5-flash": "gemini/gemini-2.5-flash-lite",
+    "gemini-2.0-flash": "gemini-3-flash",
+}
+
+def _to_litellm_model(model_name: str) -> str:
+    return _LITELLM_MODEL_MAP.get(model_name, model_name)
 
 # ---------- schemas for structured outputs ----------
 class _StringOptions(BaseModel):
@@ -49,9 +74,7 @@ def _sys(tone: str, creativity: str, language: str = "English") -> str:
 
 
 def _call_json_model(prompt: str, system_prompt: Optional[str] = None, model_override: str = None) -> dict:
-    """Call Gemini and parse JSON response from text."""
-    model = _get_model(model_override)
-
+    """Call Gemini (directly or via the LiteLLM proxy) and parse JSON response from text."""
     # Capture system prompt in Langfuse metadata (best effort)
     try:
         if system_prompt:
@@ -59,22 +82,42 @@ def _call_json_model(prompt: str, system_prompt: Optional[str] = None, model_ove
     except Exception:
         pass
 
-    resp = model.generate_content(prompt)
+    if settings.USE_LITELLM:
+        model_name = model_override or settings.GEMINI_TEXT_MODEL or "gemini-2.5-flash"
+        client = _get_litellm_client()
+        response = client.chat.completions.create(
+            model=_to_litellm_model(model_name),
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        try:
+            if response.usage:
+                set_current_usage_metrics({
+                    "input_tokens": response.usage.prompt_tokens,
+                    "output_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }, model=model_name)
+        except Exception:
+            pass
+        text = (response.choices[0].message.content or "").strip()
+    else:
+        model = _get_model(model_override)
+        resp = model.generate_content(prompt)
 
-    # Forward token usage to Langfuse (best effort)
-    try:
-        usage_meta = getattr(resp, "usage_metadata", None)
-        if usage_meta:
-            set_current_usage_metrics({
-                "input_tokens": getattr(usage_meta, "prompt_token_count", None),
-                "output_tokens": getattr(usage_meta, "candidates_token_count", None),
-                "total_tokens": getattr(usage_meta, "total_token_count", None),
-            }, model=settings.GEMINI_TEXT_MODEL)
-    except Exception:
-        pass
+        # Forward token usage to Langfuse (best effort)
+        try:
+            usage_meta = getattr(resp, "usage_metadata", None)
+            if usage_meta:
+                set_current_usage_metrics({
+                    "input_tokens": getattr(usage_meta, "prompt_token_count", None),
+                    "output_tokens": getattr(usage_meta, "candidates_token_count", None),
+                    "total_tokens": getattr(usage_meta, "total_token_count", None),
+                }, model=settings.GEMINI_TEXT_MODEL)
+        except Exception:
+            pass
 
-    text = (resp.text or "").strip()
-    
+        text = (resp.text or "").strip()
+
     # Find where the JSON actually begins
     start_idx = text.find('{')
     if start_idx == -1:
@@ -273,6 +316,25 @@ async def gen_final_blog_markdown(payload: dict) -> str:
         - If reference material was provided, incorporate facts and insights from it naturally.
         Return ONLY the Markdown text.
         """).lstrip("\n")
+
+    if settings.USE_LITELLM:
+        model_name = payload.get("model") or settings.GEMINI_TEXT_MODEL or "gemini-2.5-flash"
+        client = _get_litellm_client()
+        response = client.chat.completions.create(
+            model=_to_litellm_model(model_name),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        try:
+            if response.usage:
+                set_current_usage_metrics({
+                    "input_tokens": response.usage.prompt_tokens,
+                    "output_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }, model=model_name)
+        except Exception:
+            pass
+        return (response.choices[0].message.content or "").strip()
 
     model = _get_model(payload.get("model"))
     resp = model.generate_content(
