@@ -48,11 +48,12 @@ async def list_pending_blogs(
     admin: dict = Depends(require_admin),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=50),
+    search: str = Query("", description="Filter by author name"),
     db: Session = Depends(get_db)
 ):
     skip = (page - 1) * limit
     tenant_id = admin.get("tenant_id")
-    
+
     query = db.query(BlogPost).filter(
         BlogPost.tenant_id == tenant_id,
         or_(
@@ -60,7 +61,9 @@ async def list_pending_blogs(
             ~BlogPost.status.in_(["approved", "published", "rejected", "Approved", "Published"])
         )
     )
-    
+    if search.strip():
+        query = query.filter(BlogPost.author_name.ilike(f"%{search.strip()}%"))
+
     total = query.count()
     blogs = query.order_by(desc(BlogPost.created_at)).offset(skip).limit(limit).all()
     
@@ -88,16 +91,19 @@ async def list_published_blogs(
     admin: dict = Depends(require_admin),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=50),
+    search: str = Query("", description="Filter by author name"),
     db: Session = Depends(get_db)
 ):
     skip = (page - 1) * limit
     tenant_id = admin.get("tenant_id")
-    
+
     query = db.query(BlogPost).filter(
         BlogPost.tenant_id == tenant_id,
         BlogPost.status.in_(["approved", "published"])
     )
-    
+    if search.strip():
+        query = query.filter(BlogPost.author_name.ilike(f"%{search.strip()}%"))
+
     total = query.count()
     blogs = query.order_by(desc(BlogPost.created_at)).offset(skip).limit(limit).all()
     
