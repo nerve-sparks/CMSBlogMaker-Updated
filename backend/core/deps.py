@@ -103,10 +103,10 @@ async def require_admin(user: dict = Depends(get_current_user)):
     """
     Middleware dependency to ensure the authenticated user has administrative privileges.
     """
-    if user.get("role") != "admin":
+    if user.get("role") != "cms_admin":
         logger.warning(f"Access denied: User {user.get('email')} attempted to access an admin-only route.")
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail="Admin privileges required to perform this action."
         )
     return user

@@ -7,7 +7,7 @@ class SignupIn(BaseModel):
     name: str
     email: EmailStr
     password: str
-    role: Literal["user", "admin"] = "user"   # keep role
+    role: Literal["user", "cms_admin"] = "user"   # keep role
 
 
 class LoginIn(BaseModel):
@@ -19,7 +19,7 @@ class UserOut(BaseModel):
     id: str
     name: str
     email: EmailStr
-    role: Literal["user", "admin"]
+    role: Literal["user", "cms_admin"]
 
 
 class AdminBlogMiniOut(BaseModel):
@@ -41,7 +41,7 @@ class AdminUserWithBlogsOut(BaseModel):
     id: str
     name: str
     email: EmailStr
-    role: Literal["user", "admin"]
+    role: Literal["user", "cms_admin"]
     created_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
     blog_counts: AdminBlogCountsOut = AdminBlogCountsOut()

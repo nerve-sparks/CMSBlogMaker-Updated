@@ -205,7 +205,7 @@ async def get_blog(blog_id: str, user: dict = Depends(get_current_user), db: Ses
         raise HTTPException(status_code=404, detail="Blog not found")
     
     if b.author_id != user["id"]:
-        if user.get("role") != "admin" or b.tenant_id != user.get("tenant_id"):
+        if user.get("role") != "cms_admin" or b.tenant_id != user.get("tenant_id"):
             raise HTTPException(status_code=403, detail="Not allowed")
 
     return _map_blog_detail(b)
@@ -219,7 +219,7 @@ async def delete_blog_route(blog_id: str, user: dict = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Blog not found")
     
     if b.author_id != user["id"]:
-        if user.get("role") != "admin" or b.tenant_id != user.get("tenant_id"):
+        if user.get("role") != "cms_admin" or b.tenant_id != user.get("tenant_id"):
             raise HTTPException(status_code=403, detail="Not allowed")
 
     db.delete(b)
@@ -235,7 +235,7 @@ async def update_blog_route(blog_id: str, payload: BlogCreateIn, user: dict = De
         raise HTTPException(status_code=404, detail="Blog not found")
     
     if b.author_id != user["id"]:
-        if user.get("role") != "admin" or b.tenant_id != user.get("tenant_id"):
+        if user.get("role") != "cms_admin" or b.tenant_id != user.get("tenant_id"):
             raise HTTPException(status_code=403, detail="Not allowed")
 
     content = b.content_blocks or {}
@@ -292,7 +292,7 @@ async def change_to_draft(blog_id: str, user: dict = Depends(get_current_user), 
         raise HTTPException(status_code=404, detail="Blog not found")
     
     if b.author_id != user["id"]:
-        if user.get("role") != "admin" or b.tenant_id != user.get("tenant_id"):
+        if user.get("role") != "cms_admin" or b.tenant_id != user.get("tenant_id"):
             raise HTTPException(status_code=403, detail="Not allowed")
             
     if b.status != "published":
