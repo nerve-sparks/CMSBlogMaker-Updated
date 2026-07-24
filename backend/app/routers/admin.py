@@ -283,6 +283,33 @@ async def admin_set_blog_category(
     return {"ok": True, "blog_id": blog_id, "category_name": blog.category_name}
 
 
+class BlogAuthorIn(BaseModel):
+    author_name: Optional[str] = None
+
+
+@router.put("/blogs/{blog_id}/author", response_model=dict)
+@router.post("/blogs/{blog_id}/author", response_model=dict)
+async def admin_set_blog_author(
+    blog_id: str,
+    payload: BlogAuthorIn,
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin sets or clears the author name of any blog (including older ones)."""
+    b_id = int(blog_id)
+    blog = db.query(BlogPost).filter(
+        BlogPost.id == b_id,
+        BlogPost.tenant_id == admin.get("tenant_id"),
+    ).first()
+
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found.")
+
+    blog.author_name = (payload.author_name or "").strip() or None
+    db.commit()
+    return {"ok": True, "blog_id": blog_id, "author_name": blog.author_name}
+
+
 # ─────────────────────────────────────────────
 #  CATEGORY MANAGEMENT
 # ─────────────────────────────────────────────
