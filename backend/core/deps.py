@@ -74,12 +74,16 @@ async def get_current_user(authorization: str = Header(default="")):
             audience=settings.JWT_AUDIENCE
         )
         
+        # CMS admin status is granted solely via the per-agent admin list.
+        agent_admin_list = payload.get("agent_admin_list") or []
+        is_cms_admin = "cms_admin" in agent_admin_list
+
         # Extract the required context directly from the verified payload
         user_data = {
             "id": payload.get("sub"),
             "email": payload.get("email"),
             "name": payload.get("display_name") or payload.get("email", "").split("@")[0],
-            "role": payload.get("role", "user"),
+            "role": "cms_admin" if is_cms_admin else "user",
             "tenant_id": payload.get("tenant_id")
         }
         
