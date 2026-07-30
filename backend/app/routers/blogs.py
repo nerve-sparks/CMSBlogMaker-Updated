@@ -362,6 +362,66 @@ async def list_public_blogs(
     return {"items": items, "page": page, "limit": limit, "total": total}
 
 
+@router.get("/public/blogs/author/{author_name}", response_model=dict)
+async def list_public_blogs_by_author(
+    author_name: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=50),
+    authorization: str = Header(None),
+    category: str = Query("", description="Filter by category name"),
+    db: Session = Depends(get_db),
+):
+    if not authorization or not authorization.startswith("Bearer sk_live_"):
+        raise HTTPException(status_code=401, detail="Missing or invalid API Key. Format: 'Bearer sk_live_...'")
+
+    api_key = authorization.replace("Bearer ", "").strip()
+    db_key = db.query(TenantAPIKey).filter(TenantAPIKey.api_key == api_key).first()
+    if not db_key:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
+
+    tenant_id = db_key.tenant_id
+    skip = (page - 1) * limit
+
+    query = db.query(BlogPost).filter(
+        BlogPost.tenant_id == tenant_id,
+        BlogPost.status == "published",
+        func.lower(BlogPost.author_name).ilike(f"%{author_name.strip().lower()}%"),
+    )
+
+    if category.strip():
+        query = query.filter(func.lower(BlogPost.category_name).ilike(f"%{category.strip().lower()}%"))
+
+    total = query.count()
+    blogs = query.order_by(desc(BlogPost.updated_at)).offset(skip).limit(limit).all()
+
+    items = []
+    for b in blogs:
+        content = b.content_blocks or {}
+        meta = content.get("meta", {})
+        render = content.get("final_blog", {}).get("render", {})
+
+        cover_url = b.cover_image_url or meta.get("cover_image_url") or render.get("cover_image_url") or ""
+        if not cover_url:
+            match = re.search(r"!\[.*?\]\((.*?)\)", str(content))
+            if match:
+                cover_url = match.group(1).split(" ")[0].strip()
+
+        raw_intro = render.get("intro_md", "") or meta.get("intro_md", "")
+        clean_intro = re.sub(r"!\[.*?\]\(.*?\)", "", raw_intro).strip()
+
+        items.append({
+            "id": str(b.id),
+            "title": render.get("title", "") or meta.get("title", ""),
+            "cover_image_url": cover_url,
+            "intro": clean_intro,
+            "author": b.author_name,
+            "category": b.category_name or meta.get("focus_or_niche", ""),
+            "published_at": content.get("admin_review", {}).get("reviewed_at"),
+        })
+
+    return {"items": items, "page": page, "limit": limit, "total": total}
+
+
 @router.get("/public/blogs/{blog_id}", response_model=dict)
 async def get_public_blog(
     blog_id: str,
