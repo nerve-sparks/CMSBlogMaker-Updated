@@ -179,8 +179,8 @@ async def gen_image_prompts(payload: dict) -> List[str]:
 
 
 @observe(name="cms_blog_maker", as_type="generation")
-async def gen_final_blog_markdown(payload: dict) -> str:
-    sys_prompt = "You are a senior blog writer. Return only the Markdown text, no commentary."
+async def gen_final_blog_json(payload: dict) -> dict:
+    sys_prompt = "You are a senior blog writer. Return only valid JSON, no commentary."
     set_current_system_prompt(sys_prompt)
 
     reference_content = payload.get("reference_content", "").strip()
@@ -201,32 +201,25 @@ async def gen_final_blog_markdown(payload: dict) -> str:
     Outline headings: {payload['outline']}
     Cover image url: {payload.get('cover_image_url','')}
 
-    Write a complete blog post in Markdown.
+    Write a complete blog post.
     Rules:
-    - Start with '# {{Title}}'
-    - If cover_image_url is not empty, include: ![Cover](cover_image_url)
-    - Use '##' headings based on the outline
-    - Include a '## Conclusion' section
+    - Include a section for the conclusion.
+    - Use the outline headings to build the "sections" array, in order.
+    - Section "content_md" values should be Markdown (no headings inside them).
     - If reference material was provided, incorporate facts and insights from it naturally.
-    Return ONLY the Markdown text.
+
+    Return ONLY a valid JSON object matching this exact schema:
+    {{
+      "title": "{payload['title']}",
+      "intro_md": "Introduction in markdown",
+      "sections": [
+        {{"heading": "Heading 1", "content_md": "Markdown content for this section."}}
+      ],
+      "conclusion_md": "Concluding paragraph in markdown."
+    }}
     """).lstrip("\n")
 
     model = payload.get("model") or settings.OPENAI_TEXT_MODEL
     client = _get_client()
-
-    if _is_reasoning_model(model):
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": f"{sys_prompt}\n\n{user_prompt}"}],
-        )
-    else:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.7,
-        )
-    _capture_openai_usage(response)
-    return (response.choices[0].message.content or "").strip()
+    raw = _chat_json(client, model, sys_prompt, user_prompt)
+    return json.loads(raw)

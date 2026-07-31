@@ -280,7 +280,7 @@ async def gen_image_prompts(payload: dict) -> List[str]:
 
 # Final blog generation returns ONE markdown (not 5)
 @observe(name="cms_blog_maker", as_type="generation")
-async def gen_final_blog_markdown(payload: dict) -> str:
+async def gen_final_blog_json(payload: dict) -> dict:
     system_prompt_text = _sys(payload.get('tone', 'Formal'), payload.get('creativity', 'Regular'), payload.get('language', 'English'))
     set_current_system_prompt(system_prompt_text)
 
@@ -307,54 +307,25 @@ async def gen_final_blog_markdown(payload: dict) -> str:
     Outline headings: {payload['outline']}
     Cover image url: {payload.get('cover_image_url','')}
 
-        Write a complete blog post in Markdown.
-        Rules:
-        - Start with '# {{Title}}'
-        - If cover_image_url is not empty, include: ![Cover](cover_image_url)
-        - Use '##' headings based on the outline
-        - Include a '## Conclusion' section
-        - If reference material was provided, incorporate facts and insights from it naturally.
-        Return ONLY the Markdown text.
-        """).lstrip("\n")
+    Write a complete blog post.
+    Rules:
+    - Include a section for the conclusion.
+    - Use the outline headings to build the "sections" array, in order.
+    - Section "content_md" values should be Markdown (no headings inside them).
+    - If reference material was provided, incorporate facts and insights from it naturally.
 
-    if settings.USE_LITELLM:
-        model_name = payload.get("model") or settings.GEMINI_TEXT_MODEL or "gemini-2.5-flash"
-        client = _get_litellm_client()
-        response = client.chat.completions.create(
-            model=_to_litellm_model(model_name),
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-        )
-        try:
-            if response.usage:
-                set_current_usage_metrics({
-                    "input_tokens": response.usage.prompt_tokens,
-                    "output_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                }, model=model_name)
-        except Exception:
-            pass
-        return (response.choices[0].message.content or "").strip()
+    Return ONLY a valid JSON object matching this exact schema:
+    {{
+      "title": "{payload['title']}",
+      "intro_md": "Introduction in markdown",
+      "sections": [
+        {{"heading": "Heading 1", "content_md": "Markdown content for this section."}}
+      ],
+      "conclusion_md": "Concluding paragraph in markdown."
+    }}
+    """).lstrip("\n")
 
-    model = _get_model(payload.get("model"))
-    resp = model.generate_content(
-        prompt,
-        generation_config={"temperature": 0.7},
-    )
-
-    # Forward token usage to Langfuse
-    try:
-        usage_meta = getattr(resp, "usage_metadata", None)
-        if usage_meta:
-            set_current_usage_metrics({
-                "input_tokens": getattr(usage_meta, "prompt_token_count", None),
-                "output_tokens": getattr(usage_meta, "candidates_token_count", None),
-                "total_tokens": getattr(usage_meta, "total_token_count", None),
-            }, model=settings.GEMINI_TEXT_MODEL)
-    except Exception:
-        pass
-
-    return (resp.text or "").strip()
+    return _call_json_model(prompt, model_override=payload.get("model"))
 
 
 @observe(name="gen_youtube_blog_json", as_type="generation")

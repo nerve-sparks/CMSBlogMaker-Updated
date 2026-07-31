@@ -1,6 +1,4 @@
-import json
 import logging
-import re
 import sys
 import os
 import requests as _requests
@@ -317,66 +315,29 @@ async def blog_generate(payload: GenerateBlogIn):
         if payload.reference_links and payload.reference_links.strip():
             payload_dict["reference_content"] = fetch_reference_content(payload.reference_links)
 
-        raw_text = await _svc(payload_dict.get("model")).gen_final_blog_markdown(payload_dict)
-        clean_markdown = raw_text.strip()
+        structured_blog = await _svc(payload_dict.get("model")).gen_final_blog_json(payload_dict)
 
-        try:
-            json_str = re.sub(r'^```(json)?\n', '', clean_markdown)
-            json_str = re.sub(r'\n```$', '', json_str)
-            parsed_json = json.loads(json_str)
-            for key, value in parsed_json.items():
-                if isinstance(value, str) and "#" in value:
-                    clean_markdown = value
-                    break
-        except Exception:
-            pass
+        title = structured_blog.get("title") or payload_dict.get("title", "Untitled")
+        intro_md = structured_blog.get("intro_md", "")
+        sections = structured_blog.get("sections", [])
+        if not isinstance(sections, list):
+            sections = []
+        conclusion_md = structured_blog.get("conclusion_md", "")
 
-        clean_markdown = clean_markdown.replace("\\n", "\n")
-        lines = clean_markdown.split('\n')
-        intro_lines = []
-        sections = []
-        conclusion_lines = []
-        current_mode = "intro"
-        current_heading = ""
-        current_content = []
-
-        for line in lines:
-            if line.startswith("# "):
-                continue
-            if line.startswith("## "):
-                if current_mode == "section":
-                    sections.append({
-                        "heading": current_heading,
-                        "content_md": "\n".join(current_content).strip()
-                    })
-                heading_text = line.replace("## ", "").strip()
-                if "conclusion" in heading_text.lower() or "summary" in heading_text.lower():
-                    current_mode = "conclusion"
-                else:
-                    current_mode = "section"
-                    current_heading = heading_text
-                    current_content = []
-            else:
-                if current_mode == "intro":
-                    intro_lines.append(line)
-                elif current_mode == "section":
-                    current_content.append(line)
-                elif current_mode == "conclusion":
-                    conclusion_lines.append(line)
-                    
-        if current_mode == "section" and current_heading:
-            sections.append({
-                "heading": current_heading,
-                "content_md": "\n".join(current_content).strip()
-            })
+        markdown_parts = [f"# {title}", "", intro_md]
+        for section in sections:
+            markdown_parts += ["", f"## {section.get('heading', '')}", "", section.get("content_md", "")]
+        if conclusion_md:
+            markdown_parts += ["", "## Conclusion", "", conclusion_md]
+        clean_markdown = "\n".join(markdown_parts).strip()
 
         return {
             "markdown": clean_markdown,
             "render": {
-                "title": payload_dict.get("title", "Untitled"),
-                "intro_md": "\n".join(intro_lines).strip(),
+                "title": title,
+                "intro_md": intro_md,
                 "sections": sections,
-                "conclusion_md": "\n".join(conclusion_lines).strip()
+                "conclusion_md": conclusion_md
             }
         }
     except Exception as e:
