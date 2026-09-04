@@ -25,44 +25,58 @@ from langfuse_tracer import set_current_input_data
 
 logger = logging.getLogger(__name__)
 
+# Model ids verified against the account's live ListModels output.
+# Keep ids exact — a typo silently routes to Gemini and 404s at call time.
 AVAILABLE_TEXT_MODELS = [
     # ── Google Gemini ──────────────────────────────────────────────────────────
     {
-        "id": "gemini-2.5-pro",
-        "name": "Gemini 2.5 Pro",
+        "id": "gemini-3.1-pro-preview",
+        "name": "Gemini 3.1 Pro",
         "provider": "google",
         "tier": "pro",
         "speed": "slow",
         "badge": "Best Quality",
-        "description": "Highest quality with deep thinking. Best for long-form, research-heavy blogs.",
+        "description": "Deepest reasoning. Best for long-form, research-heavy blogs.",
     },
     {
-        "id": "gemini-2.5-flash",
-        "name": "Gemini 2.5 Flash",
+        "id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
         "provider": "google",
         "tier": "standard",
         "speed": "fast",
         "badge": "Recommended",
-        "description": "Fast with great quality. Best balance for most blogs.",
+        "description": "Latest generation. Fast, high quality — best balance for most blogs.",
     },
     {
-        "id": "gemini-2.0-flash",
-        "name": "Gemini 2.0 Flash",
+        "id": "gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
         "provider": "google",
         "tier": "standard",
         "speed": "fast",
         "badge": None,
-        "description": "Previous generation. Reliable and fast.",
+        "description": "Reliable all-rounder. Slightly more verbose than 3.8.",
+    },
+    {
+        "id": "gemini-3.5-flash-lite",
+        "name": "Gemini 3.5 Flash Lite",
+        "provider": "google",
+        "tier": "lite",
+        "speed": "fastest",
+        "badge": "Fastest",
+        "description": "Lowest latency and cost. Good for drafts and quick iterations.",
     },
 ]
 
+# NOTE: `id` here is a PROVIDER selector, not a model id — it must stay
+# "gemini"/"openai" to match ImageGenerateIn.image_model. The concrete Gemini
+# model comes from settings.GEMINI_IMAGE_MODEL.
 AVAILABLE_IMAGE_MODELS = [
     {
         "id": "gemini",
-        "name": "Imagen 3",
+        "name": "Gemini 3.1 Flash Image",
         "provider": "google",
         "badge": "Recommended",
-        "description": "Google's Imagen 3. Vivid, high-detail illustrations.",
+        "description": "Google's latest image model. Vivid, high-detail illustrations.",
     },
 ]
 

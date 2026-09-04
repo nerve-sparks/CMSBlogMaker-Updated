@@ -27,8 +27,8 @@ class Settings:
     
     # AI/ML Settings
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_TEXT_MODEL: str = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash")
-    GEMINI_IMAGE_MODEL: str = os.getenv("GEMINI_IMAGE_MODEL", "imagen-3.0-generate-001")
+    GEMINI_TEXT_MODEL: str = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.8-flash")
+    GEMINI_IMAGE_MODEL: str = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
     
     # Google Cloud Storage Settings
     GCS_BUCKET: str = os.getenv("GCS_BUCKET", "")
@@ -50,7 +50,7 @@ class Settings:
 
     # LiteLLM/BridgeLLM proxy toggle — routes text (and image) generation through an
     # OpenAI-compatible proxy instead of calling Gemini/OpenAI directly. The model id
-    # the user picks (e.g. "gemini-2.5-pro") is sent to the proxy unchanged, no prefix.
+    # the user picks (e.g. "gemini-3.8-flash") is sent to the proxy unchanged, no prefix.
     USE_LITELLM: bool = os.getenv("USE_LITELLM", "false").lower() == "true"
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "")

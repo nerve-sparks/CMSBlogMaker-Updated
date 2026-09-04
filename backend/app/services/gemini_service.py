@@ -25,7 +25,7 @@ def _get_model(model_override: str = None) -> "genai.GenerativeModel":
     if not settings.GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not set.")
     genai.configure(api_key=settings.GEMINI_API_KEY)
-    model_name = model_override or settings.GEMINI_TEXT_MODEL or "gemini-2.5-flash"
+    model_name = model_override or settings.GEMINI_TEXT_MODEL or "gemini-3.8-flash"
     return genai.GenerativeModel(model_name)
 
 
@@ -40,13 +40,14 @@ def _get_litellm_client() -> OpenAI:
     return _litellm_client
 
 
-# The app's model picker ids (gemini-2.5-pro, etc.) don't exist on the LiteLLM proxy —
+# The app's model picker ids (gemini-3.8-flash, etc.) don't exist on the LiteLLM proxy —
 # map each to the closest id actually available there (confirmed against the proxy's
 # /v1/models list). Direct-Gemini calls (USE_LITELLM=false) use the real ids, unmapped.
 _LITELLM_MODEL_MAP = {
-    "gemini-2.5-pro": "gemini-pro",
-    "gemini-2.5-flash": "gemini/gemini-2.5-flash-lite",
-    "gemini-2.0-flash": "gemini-3-flash",
+    "gemini-3.1-pro-preview": "gemini-pro",
+    "gemini-3.8-flash": "gemini-3-flash",
+    "gemini-3.5-flash": "gemini-3-flash",
+    "gemini-3.5-flash-lite": "gemini/gemini-2.5-flash-lite",
 }
 
 def _to_litellm_model(model_name: str) -> str:
@@ -83,7 +84,7 @@ def _call_json_model(prompt: str, system_prompt: Optional[str] = None, model_ove
         pass
 
     if settings.USE_LITELLM:
-        model_name = model_override or settings.GEMINI_TEXT_MODEL or "gemini-2.5-flash"
+        model_name = model_override or settings.GEMINI_TEXT_MODEL or "gemini-3.8-flash"
         client = _get_litellm_client()
         response = client.chat.completions.create(
             model=_to_litellm_model(model_name),
@@ -384,5 +385,5 @@ async def gen_youtube_blog_json(payload: dict) -> dict:
     {transcript[:100000]}
     """).strip()
 
-    data = _call_json_model(prompt)
+    data = _call_json_model(prompt, model_override=payload.get("model"))
     return data

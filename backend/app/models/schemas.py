@@ -66,6 +66,7 @@ class YoutubeBlogIn(BaseModel):
     tone: Optional[str] = "Formal"
     language: str = "English"
     image_count: Optional[int] = 0
+    model: Optional[str] = None  # LLM model override (e.g. "gemini-3.8-flash")
 
 class FinalBlog(BaseModel):
     blocks: List[dict] = []
@@ -154,7 +155,7 @@ class TopicIdeasIn(BaseModel):
     creativity: str
     count: int = Field(default=AI_OPTIONS_COUNT, ge=1, le=AI_OPTIONS_MAX)
     session_id: Optional[str] = None  # shared across full blog workflow for grouping in Langfuse
-    model: Optional[str] = None  # LLM model override (e.g. "gpt-4o", "gemini-2.5-flash")
+    model: Optional[str] = None  # LLM model override (e.g. "gpt-4o", "gemini-3.8-flash")
 
 
 class TitlesIn(BaseModel):
