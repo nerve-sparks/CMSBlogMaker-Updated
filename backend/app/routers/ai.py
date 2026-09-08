@@ -57,13 +57,34 @@ AVAILABLE_TEXT_MODELS = [
         "description": "Reliable all-rounder. Slightly more verbose than 3.8.",
     },
     {
-        "id": "gemini-3.5-flash-lite",
-        "name": "Gemini 3.5 Flash Lite",
+        "id": "gemini-3.1-flash-lite",
+        "name": "Gemini 3.1 Flash Lite",
         "provider": "google",
         "tier": "lite",
         "speed": "fastest",
         "badge": "Fastest",
         "description": "Lowest latency and cost. Good for drafts and quick iterations.",
+    },
+    # ── OpenAI ─────────────────────────────────────────────────────────────────
+    # NOTE: these reach OpenAI only through the LiteLLM proxy — the direct
+    # OPENAI_API_KEY path is not currently authorised for them.
+    {
+        "id": "gpt-5.6",
+        "name": "GPT-5.6",
+        "provider": "openai",
+        "tier": "pro",
+        "speed": "slow",
+        "badge": "Most Capable",
+        "description": "OpenAI's strongest reasoning model. Excellent for technical depth.",
+    },
+    {
+        "id": "gpt-5.4-mini",
+        "name": "GPT-5.4 Mini",
+        "provider": "openai",
+        "tier": "standard",
+        "speed": "fast",
+        "badge": None,
+        "description": "Fast OpenAI option with a different writing voice than Gemini.",
     },
 ]
 

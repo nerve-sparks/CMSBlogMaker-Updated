@@ -1,6 +1,7 @@
 from typing import List
 from textwrap import dedent
 import json
+import logging
 import sys
 import os
 
@@ -62,15 +63,25 @@ def _chat_json(client, model: str, system: str, user: str) -> str:
             messages=[{"role": "user", "content": f"{system}\n\n{user}"}],
         )
     else:
-        response = client.chat.completions.create(
+        kwargs = dict(
             model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
             response_format={"type": "json_object"},
-            temperature=0.7,
         )
+        try:
+            response = client.chat.completions.create(temperature=0.7, **kwargs)
+        except Exception as e:
+            # Higher-reasoning models (gpt-5.5/5.6, *-pro, …) reject an explicit
+            # temperature and only accept their own default. Prefix-matching
+            # these is a losing game — every new release adds another — so
+            # retry once without it and let the model decide.
+            if "temperature" not in str(e).lower():
+                raise
+            logging.warning("[OPENAI] %s rejected temperature; retrying without it.", model)
+            response = client.chat.completions.create(**kwargs)
     _capture_openai_usage(response)
     return response.choices[0].message.content or ""
 

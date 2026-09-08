@@ -43,11 +43,15 @@ def _get_litellm_client() -> OpenAI:
 # The app's model picker ids (gemini-3.8-flash, etc.) don't exist on the LiteLLM proxy —
 # map each to the closest id actually available there (confirmed against the proxy's
 # /v1/models list). Direct-Gemini calls (USE_LITELLM=false) use the real ids, unmapped.
+# Verified with scripts/check_litellm.py against llm.bridgellm.nervesparks.com.
+# The proxy's bare "gemini-3-flash"/"gemini-3-pro" entries appear in /v1/models
+# but 404 on call, so always target the "gemini/"-prefixed passthrough ids.
 _LITELLM_MODEL_MAP = {
-    "gemini-3.1-pro-preview": "gemini-pro",
-    "gemini-3.8-flash": "gemini-3-flash",
-    "gemini-3.5-flash": "gemini-3-flash",
-    "gemini-3.5-flash-lite": "gemini/gemini-2.5-flash-lite",
+    "gemini-3.1-pro-preview": "gemini/gemini-3.1-pro-preview",
+    "gemini-3.8-flash": "gemini/gemini-3.8-flash",
+    "gemini-3.5-flash": "gemini/gemini-3.5-flash",
+    # gemini-3.1-flash-lite and every gpt-* id are served under their own
+    # name, so they pass through unmapped.
 }
 
 def _to_litellm_model(model_name: str) -> str:
